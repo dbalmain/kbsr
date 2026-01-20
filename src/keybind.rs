@@ -47,20 +47,37 @@ impl Chord {
     }
 
     /// Check if this chord matches a key event
-    /// Handles case-insensitivity for character keys with modifiers
+    /// Handles both keyboard modes:
+    /// - Chars mode: crossterm converts Shift+g to 'G', so exact match works
+    /// - Raw mode: Shift+g stays as Shift+g, so we check if uppercase matches
     pub fn matches(&self, event: &KeyEvent) -> bool {
-        // Modifiers must match
-        if self.0.modifiers != event.modifiers {
-            return false;
-        }
-
-        // For character keys, compare case-insensitively when modifiers are present
-        // (crossterm reports Ctrl+S as Char('s') with CONTROL, not Char('S'))
         match (&self.0.code, &event.code) {
             (KeyCode::Char(expected), KeyCode::Char(actual)) => {
-                expected.eq_ignore_ascii_case(actual)
+                if self.0.modifiers == KeyModifiers::NONE {
+                    // Unmodified character chord (e.g., 'G' or '$')
+                    if *expected == *actual {
+                        // Exact match (works in Chars mode)
+                        return true;
+                    }
+                    // Raw mode: check if Shift+lowercase produces this char
+                    if event.modifiers == KeyModifiers::SHIFT {
+                        // For uppercase letters: Shift+g should match 'G'
+                        if expected.is_ascii_uppercase()
+                            && *actual == expected.to_ascii_lowercase()
+                        {
+                            return true;
+                        }
+                    }
+                    false
+                } else {
+                    // Has explicit modifiers: require modifier match and case-insensitive char
+                    self.0.modifiers == event.modifiers && expected.eq_ignore_ascii_case(actual)
+                }
             }
-            (a, b) => a == b,
+            _ => {
+                // Non-character keys: require exact match including modifiers
+                self.0.modifiers == event.modifiers && self.0.code == event.code
+            }
         }
     }
 }
@@ -70,26 +87,26 @@ impl fmt::Display for Chord {
         let mut parts = Vec::new();
 
         if self.0.modifiers.contains(KeyModifiers::CONTROL) {
-            parts.push("Ctrl");
+            parts.push("Ctrl".to_string());
         }
         if self.0.modifiers.contains(KeyModifiers::ALT) {
-            parts.push("Alt");
+            parts.push("Alt".to_string());
         }
         if self.0.modifiers.contains(KeyModifiers::SHIFT) {
-            parts.push("Shift");
+            parts.push("Shift".to_string());
         }
         if self.0.modifiers.contains(KeyModifiers::SUPER) {
-            parts.push("Super");
+            parts.push("Super".to_string());
         }
         if self.0.modifiers.contains(KeyModifiers::META) {
-            parts.push("Meta");
+            parts.push("Meta".to_string());
         }
         if self.0.modifiers.contains(KeyModifiers::HYPER) {
-            parts.push("Hyper");
+            parts.push("Hyper".to_string());
         }
 
         let key_str = format_key_code(&self.0.code);
-        parts.push(&key_str);
+        parts.push(key_str);
 
         let result = parts.join("+");
         write!(f, "{}", result)
@@ -202,7 +219,7 @@ fn format_key_code(code: &KeyCode) -> String {
 }
 
 /// Convert a KeyEvent to a Chord (for display purposes)
-pub fn key_event_to_chord(event: &KeyEvent) -> Chord {
+pub(crate) fn key_event_to_chord(event: &KeyEvent) -> Chord {
     Chord(KeyEvent::new(event.code, event.modifiers))
 }
 
@@ -278,8 +295,15 @@ mod tests {
 
     #[test]
     fn test_keybind_display() {
+        // Characters preserve their original case from parsing
         let kb = Keybind::parse("Ctrl+K Ctrl+C").unwrap();
         assert_eq!(kb.to_string(), "Ctrl+K Ctrl+C");
+
+        let kb_lower = Keybind::parse("g g").unwrap();
+        assert_eq!(kb_lower.to_string(), "g g");
+
+        let kb_upper = Keybind::parse("G").unwrap();
+        assert_eq!(kb_upper.to_string(), "G");
     }
 
     #[test]
@@ -301,5 +325,32 @@ mod tests {
         // Different modifiers don't match
         let wrong_mods = KeyEvent::new(KeyCode::Char('s'), KeyModifiers::ALT);
         assert!(!chord.matches(&wrong_mods));
+    }
+
+    #[test]
+    fn test_unmodified_char_matching() {
+        // `$` chord matches '$' character (Chars mode)
+        let chord = Chord::parse("$").unwrap();
+        assert_eq!(chord.0.modifiers, KeyModifiers::NONE);
+
+        let event = KeyEvent::new(KeyCode::Char('$'), KeyModifiers::NONE);
+        assert!(chord.matches(&event));
+
+        // Wrong character doesn't match
+        let wrong = KeyEvent::new(KeyCode::Char('4'), KeyModifiers::NONE);
+        assert!(!chord.matches(&wrong));
+
+        // `G` chord matches 'G' character (Chars mode)
+        let chord_g = Chord::parse("G").unwrap();
+        let event_g = KeyEvent::new(KeyCode::Char('G'), KeyModifiers::NONE);
+        assert!(chord_g.matches(&event_g));
+
+        // `G` chord also matches Shift+g (Raw mode)
+        let event_shift_g = KeyEvent::new(KeyCode::Char('g'), KeyModifiers::SHIFT);
+        assert!(chord_g.matches(&event_shift_g));
+
+        // Lowercase 'g' without Shift does NOT match 'G' chord
+        let event_lower = KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE);
+        assert!(!chord_g.matches(&event_lower));
     }
 }

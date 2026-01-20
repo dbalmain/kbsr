@@ -2,6 +2,18 @@ use crate::keybind::Keybind;
 use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
 
+/// Keyboard input mode for a deck
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum KeyboardMode {
+    /// Raw mode: report keys with explicit modifiers (e.g., Super+Shift+1)
+    /// Best for window manager bindings like hyprland
+    #[default]
+    Raw,
+    /// Character mode: report the resulting character (e.g., G, $, !)
+    /// Best for vim-style bindings
+    Chars,
+}
+
 /// A single card in a deck
 #[derive(Debug, Clone)]
 pub struct Card {
@@ -14,12 +26,13 @@ pub struct Card {
 pub struct Deck {
     pub name: String,
     pub cards: Vec<Card>,
+    pub keyboard_mode: KeyboardMode,
 }
 
 impl Deck {
     /// Load a deck from a TSV file
     /// Format: keybind<TAB>description
-    /// Lines starting with # are comments
+    /// Lines starting with # are comments (or directives like `# mode: chars`)
     /// Empty lines are skipped
     pub fn load(path: &Path) -> Result<Self> {
         let name = path
@@ -32,12 +45,34 @@ impl Deck {
             .with_context(|| format!("Failed to read deck file: {}", path.display()))?;
 
         let mut cards = Vec::new();
+        let mut keyboard_mode = KeyboardMode::default();
 
         for (line_num, line) in content.lines().enumerate() {
             let line = line.trim();
 
-            // Skip empty lines and comments
-            if line.is_empty() || line.starts_with('#') {
+            // Skip empty lines
+            if line.is_empty() {
+                continue;
+            }
+
+            // Handle comments and directives
+            if line.starts_with('#') {
+                // Check for mode directive: `# mode: raw` or `# mode: chars`
+                if let Some(rest) = line.strip_prefix('#') {
+                    let rest = rest.trim();
+                    if let Some(mode_value) = rest.strip_prefix("mode:") {
+                        match mode_value.trim().to_lowercase().as_str() {
+                            "raw" => keyboard_mode = KeyboardMode::Raw,
+                            "chars" | "char" | "characters" => keyboard_mode = KeyboardMode::Chars,
+                            other => anyhow::bail!(
+                                "Unknown keyboard mode '{}' on line {} in {}. Use 'raw' or 'chars'.",
+                                other,
+                                line_num + 1,
+                                path.display()
+                            ),
+                        }
+                    }
+                }
                 continue;
             }
 
@@ -64,7 +99,7 @@ impl Deck {
             });
         }
 
-        Ok(Deck { name, cards })
+        Ok(Deck { name, cards, keyboard_mode })
     }
 }
 

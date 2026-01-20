@@ -1,4 +1,5 @@
 use crate::matcher::MatchState;
+use crate::storage::DeckStats;
 use ratatui::{
     Frame,
     layout::{Alignment, Constraint, Layout},
@@ -9,6 +10,8 @@ use ratatui::{
 
 /// UI state for rendering
 pub struct UiState<'a> {
+    /// The deck name
+    pub deck: &'a str,
     /// The clue/description to display
     pub clue: &'a str,
     /// Current match state (typed chords and success/fail)
@@ -19,51 +22,74 @@ pub struct UiState<'a> {
     pub answer: &'a str,
     /// Message to display (e.g., "Type the answer to continue")
     pub message: Option<&'a str>,
+    /// Whether to show the success checkmark
+    pub show_success_checkmark: bool,
 }
 
 /// Render the minimal UI
 pub fn render(frame: &mut Frame, state: &UiState) {
     let area = frame.area();
 
-    // Calculate layout - just two centered sections
+    // Calculate layout - centered sections
     let chunks = Layout::vertical([
         Constraint::Fill(1),   // Top spacer
+        Constraint::Length(1), // Deck name
         Constraint::Length(3), // Clue area
         Constraint::Length(2), // Typed keys area
-        Constraint::Length(1), // Message area
+        Constraint::Length(1), // Spacer before answer/message
+        Constraint::Length(1), // Answer area (when showing)
+        Constraint::Length(1), // Message/checkmark area
         Constraint::Fill(1),   // Bottom spacer
     ])
     .split(area);
+
+    // Render deck name (dimmed, centered)
+    let deck = Paragraph::new(state.deck)
+        .style(Style::default().fg(Color::DarkGray))
+        .alignment(Alignment::Center);
+    frame.render_widget(deck, chunks[1]);
 
     // Render clue (centered)
     let clue = Paragraph::new(state.clue)
         .style(Style::default().fg(Color::White))
         .alignment(Alignment::Center);
-    frame.render_widget(clue, chunks[1]);
+    frame.render_widget(clue, chunks[2]);
 
     // Render typed keys with appropriate color
     let typed_line = render_typed_chords(state.match_state, state.showing_answer);
     let typed = Paragraph::new(typed_line).alignment(Alignment::Center);
-    frame.render_widget(typed, chunks[2]);
+    frame.render_widget(typed, chunks[3]);
 
-    // Render message if present, or answer if showing
+    // chunks[4] is spacer
+
+    // Render answer if showing (below typed keys)
+    if state.showing_answer {
+        let answer_line = Line::from(vec![
+            Span::styled("Answer: ", Style::default().fg(Color::DarkGray)),
+            Span::styled(state.answer, Style::default().fg(Color::White)),
+        ]);
+        let answer = Paragraph::new(answer_line).alignment(Alignment::Center);
+        frame.render_widget(answer, chunks[5]);
+    }
+
+    // Render message or checkmark
     if let Some(msg) = state.message {
         let message = Paragraph::new(msg)
             .style(Style::default().fg(Color::Yellow))
             .alignment(Alignment::Center);
-        frame.render_widget(message, chunks[3]);
-    } else if state.showing_answer {
-        let answer_line = Line::from(vec![
-            Span::styled("Answer: ", Style::default().fg(Color::DarkGray)),
-            Span::styled(state.answer, Style::default().fg(Color::Cyan)),
-        ]);
-        let answer = Paragraph::new(answer_line).alignment(Alignment::Center);
-        frame.render_widget(answer, chunks[3]);
+        frame.render_widget(message, chunks[6]);
+    } else if state.show_success_checkmark {
+        let checkmark = Paragraph::new(Line::from(Span::styled(
+            "✓",
+            Style::default().fg(Color::Green),
+        )))
+        .alignment(Alignment::Center);
+        frame.render_widget(checkmark, chunks[6]);
     }
 }
 
 /// Render the typed chords with appropriate coloring
-fn render_typed_chords(state: &MatchState, showing_answer: bool) -> Line<'static> {
+fn render_typed_chords(state: &MatchState, _showing_answer: bool) -> Line<'static> {
     let chords = state.typed_chords();
 
     if chords.is_empty() {
@@ -82,18 +108,15 @@ fn render_typed_chords(state: &MatchState, showing_answer: bool) -> Line<'static
         MatchState::Failed(_) => Color::Red,
     };
 
-    // If showing answer and in failed state, dim the text
-    let style = if showing_answer && state.is_failed() {
-        Style::default().fg(Color::DarkGray)
-    } else {
-        Style::default().fg(color)
-    };
+    // Always show red/green feedback so user knows if they're typing correctly,
+    // even when the answer is revealed (they might be touch-typing)
+    let style = Style::default().fg(color);
 
     Line::from(Span::styled(text, style))
 }
 
 /// Render deck selection screen
-pub fn render_deck_selection(frame: &mut Frame, decks: &[(String, i32, i32)], selected: usize) {
+pub fn render_deck_selection(frame: &mut Frame, decks: &[DeckStats], selected: usize) {
     let area = frame.area();
 
     let chunks = Layout::vertical([
@@ -113,7 +136,7 @@ pub fn render_deck_selection(frame: &mut Frame, decks: &[(String, i32, i32)], se
     // Deck list
     let mut lines: Vec<Line> = Vec::new();
 
-    for (i, (name, total, due)) in decks.iter().enumerate() {
+    for (i, deck) in decks.iter().enumerate() {
         let prefix = if i == selected { "> " } else { "  " };
         let style = if i == selected {
             Style::default().fg(Color::Cyan)
@@ -122,7 +145,7 @@ pub fn render_deck_selection(frame: &mut Frame, decks: &[(String, i32, i32)], se
         };
 
         let line = Line::from(Span::styled(
-            format!("{}{} ({} due / {} total)", prefix, name, due, total),
+            format!("{}{} ({} due / {} total)", prefix, deck.name, deck.due_cards, deck.total_cards),
             style,
         ));
         lines.push(line);
@@ -143,6 +166,33 @@ pub fn render_deck_selection(frame: &mut Frame, decks: &[(String, i32, i32)], se
 
     let list = Paragraph::new(lines).alignment(Alignment::Center);
     frame.render_widget(list, chunks[2]);
+}
+
+/// Render paused screen
+pub fn render_paused(frame: &mut Frame, resume_keybind: &str) {
+    let area = frame.area();
+
+    let chunks = Layout::vertical([
+        Constraint::Fill(1),
+        Constraint::Length(4),
+        Constraint::Fill(1),
+    ])
+    .split(area);
+
+    let lines = vec![
+        Line::from(Span::styled(
+            "PAUSED",
+            Style::default().fg(Color::Yellow),
+        )),
+        Line::from(""),
+        Line::from(Span::styled(
+            format!("Press {} to resume", resume_keybind),
+            Style::default().fg(Color::DarkGray),
+        )),
+    ];
+
+    let paused = Paragraph::new(lines).alignment(Alignment::Center);
+    frame.render_widget(paused, chunks[1]);
 }
 
 /// Render session summary

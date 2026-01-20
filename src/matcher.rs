@@ -22,12 +22,12 @@ impl MatchState {
         }
     }
 
-    /// Check if in failed state
+    #[cfg(test)]
     pub fn is_failed(&self) -> bool {
         matches!(self, MatchState::Failed(_))
     }
 
-    /// Check if complete
+    #[cfg(test)]
     pub fn is_complete(&self) -> bool {
         matches!(self, MatchState::Complete(_))
     }
@@ -66,6 +66,10 @@ impl Matcher {
 
         // Check if it matches the expected chord at this position
         let position = self.typed.len() - 1;
+        if position >= self.expected.len() {
+            self.failed = true;
+            return MatchState::Failed(self.typed.clone());
+        }
         let expected_chord = &self.expected.0[position];
 
         if !expected_chord.matches(&event) {

@@ -16,9 +16,25 @@ pub enum Rating {
 }
 
 impl Rating {
-    /// Derive rating from response time and number of attempts
-    /// This is called when the user got the answer correct
-    pub fn from_performance(response_time_ms: u64, attempts: u8, _timeout_secs: u64) -> Self {
+    /// Derive rating from response time, attempts, and presentation count
+    /// This is called when the user got the answer correct on first attempt
+    /// presentation_count: how many times the card was shown before getting it right first try
+    pub fn from_performance(
+        response_time_ms: u64,
+        attempts: u8,
+        presentation_count: i32,
+    ) -> Self {
+        // If they needed multiple presentations to get it right, cap at Hard
+        // (even if they were fast this time, they struggled before)
+        if presentation_count > 0 {
+            // Many presentations = treat as Again for stronger reinforcement
+            if presentation_count >= 3 {
+                return Rating::Again;
+            }
+            // Some presentations = Hard at best
+            return Rating::Hard;
+        }
+
         // Too many attempts = Again (shouldn't normally happen since we reveal at 3)
         if attempts >= 3 {
             return Rating::Again;
@@ -59,10 +75,6 @@ impl Scheduler {
         })
     }
 
-    /// Create with default 0.9 retention rate
-    pub fn with_default_retention() -> Result<Self> {
-        Self::new(0.9)
-    }
 
     /// Get next states for a card
     /// Returns NextStates for scheduling
@@ -125,44 +137,63 @@ mod tests {
 
     #[test]
     fn test_rating_easy() {
-        let rating = Rating::from_performance(1500, 1, 5);
+        // Fast, 1 attempt, no prior presentations
+        let rating = Rating::from_performance(1500, 1, 0);
         assert_eq!(rating, Rating::Easy);
     }
 
     #[test]
     fn test_rating_good() {
-        let rating = Rating::from_performance(3000, 1, 5);
+        // Moderate time, 1 attempt, no prior presentations
+        let rating = Rating::from_performance(3000, 1, 0);
         assert_eq!(rating, Rating::Good);
     }
 
     #[test]
     fn test_rating_hard_time() {
-        let rating = Rating::from_performance(6000, 1, 5);
+        // Slow response
+        let rating = Rating::from_performance(6000, 1, 0);
         assert_eq!(rating, Rating::Hard);
     }
 
     #[test]
     fn test_rating_hard_attempts() {
-        let rating = Rating::from_performance(2000, 2, 5);
+        // 2 attempts
+        let rating = Rating::from_performance(2000, 2, 0);
         assert_eq!(rating, Rating::Hard);
     }
 
     #[test]
     fn test_rating_hard_at_timeout() {
-        // At exactly the timeout threshold, but user still got it correct = Hard
-        let rating = Rating::from_performance(5000, 1, 5);
+        // At exactly the timeout threshold
+        let rating = Rating::from_performance(5000, 1, 0);
         assert_eq!(rating, Rating::Hard);
     }
 
     #[test]
     fn test_rating_again_attempts() {
-        let rating = Rating::from_performance(2000, 3, 5);
+        // 3+ attempts
+        let rating = Rating::from_performance(2000, 3, 0);
+        assert_eq!(rating, Rating::Again);
+    }
+
+    #[test]
+    fn test_rating_hard_with_presentations() {
+        // Fast but had 1-2 prior failed presentations = Hard at best
+        let rating = Rating::from_performance(1500, 1, 1);
+        assert_eq!(rating, Rating::Hard);
+    }
+
+    #[test]
+    fn test_rating_again_with_many_presentations() {
+        // 3+ prior presentations = Again
+        let rating = Rating::from_performance(1500, 1, 3);
         assert_eq!(rating, Rating::Again);
     }
 
     #[test]
     fn test_schedule_new_card() {
-        let scheduler = Scheduler::with_default_retention().unwrap();
+        let scheduler = Scheduler::new(0.9).unwrap();
         let (memory, due) = scheduler.schedule(None, None, Rating::Good).unwrap();
 
         assert!(memory.stability > 0.0);

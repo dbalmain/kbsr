@@ -12,6 +12,30 @@ pub struct Config {
     #[serde(default = "default_max_attempts")]
     pub max_attempts: u8,
 
+    /// Delay in milliseconds to show success indicator (default: 500)
+    #[serde(default = "default_success_delay")]
+    pub success_delay_ms: u64,
+
+    /// Delay in milliseconds to show failed flash before retry (default: 500)
+    #[serde(default = "default_failed_flash_delay")]
+    pub failed_flash_delay_ms: u64,
+
+    /// Keybind to pause the app (default: "Super+Ctrl+Shift+P")
+    #[serde(default = "default_pause_keybind")]
+    pub pause_keybind: String,
+
+    /// Keybind to quit the app (default: "Super+Ctrl+Shift+Q")
+    #[serde(default = "default_quit_keybind")]
+    pub quit_keybind: String,
+
+    /// Shuffle cards before each study session (default: true)
+    #[serde(default = "default_shuffle_cards")]
+    pub shuffle_cards: bool,
+
+    /// FSRS desired retention rate 0.0-1.0 (default: 0.9)
+    #[serde(default = "default_desired_retention")]
+    pub desired_retention: f32,
+
     /// Path to decks directory
     #[serde(default = "default_decks_dir")]
     pub decks_dir: PathBuf,
@@ -27,6 +51,30 @@ fn default_timeout() -> u64 {
 
 fn default_max_attempts() -> u8 {
     3
+}
+
+fn default_success_delay() -> u64 {
+    500
+}
+
+fn default_failed_flash_delay() -> u64 {
+    500
+}
+
+fn default_pause_keybind() -> String {
+    "Super+Ctrl+Shift+P".to_string()
+}
+
+fn default_quit_keybind() -> String {
+    "Super+Ctrl+Shift+Q".to_string()
+}
+
+fn default_shuffle_cards() -> bool {
+    true
+}
+
+fn default_desired_retention() -> f32 {
+    0.9
 }
 
 fn default_decks_dir() -> PathBuf {
@@ -46,6 +94,12 @@ impl Default for Config {
         Self {
             timeout_secs: default_timeout(),
             max_attempts: default_max_attempts(),
+            success_delay_ms: default_success_delay(),
+            failed_flash_delay_ms: default_failed_flash_delay(),
+            pause_keybind: default_pause_keybind(),
+            quit_keybind: default_quit_keybind(),
+            shuffle_cards: default_shuffle_cards(),
+            desired_retention: default_desired_retention(),
             decks_dir: default_decks_dir(),
             db_path: default_db_path(),
         }
