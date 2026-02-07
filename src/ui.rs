@@ -1,11 +1,11 @@
 use crate::matcher::MatchState;
 use crate::storage::DeckStats;
 use ratatui::{
-    Frame,
     layout::{Alignment, Constraint, Layout},
     style::{Color, Style},
     text::{Line, Span},
     widgets::Paragraph,
+    Frame,
 };
 
 /// UI state for rendering
@@ -145,7 +145,10 @@ pub fn render_deck_selection(frame: &mut Frame, decks: &[DeckStats], selected: u
         };
 
         let line = Line::from(Span::styled(
-            format!("{}{} ({} due / {} total)", prefix, deck.name, deck.due_cards, deck.total_cards),
+            format!(
+                "{}{} ({} due / {} total)",
+                prefix, deck.name, deck.due_cards, deck.total_cards
+            ),
             style,
         ));
         lines.push(line);
@@ -180,10 +183,7 @@ pub fn render_paused(frame: &mut Frame, resume_keybind: &str) {
     .split(area);
 
     let lines = vec![
-        Line::from(Span::styled(
-            "PAUSED",
-            Style::default().fg(Color::Yellow),
-        )),
+        Line::from(Span::styled("PAUSED", Style::default().fg(Color::Yellow))),
         Line::from(""),
         Line::from(Span::styled(
             format!("Press {} to resume", resume_keybind),
@@ -223,7 +223,7 @@ pub fn render_summary(frame: &mut Frame, reviewed: usize, correct: usize, total_
         Line::from(format!("Time: {}s", total_time_secs)),
         Line::from(""),
         Line::from(Span::styled(
-            "Press any key to exit",
+            "Press q to quit or any other key to return to the decks",
             Style::default().fg(Color::DarkGray),
         )),
     ];

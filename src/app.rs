@@ -500,8 +500,14 @@ impl App {
     }
 
     /// Handle summary input
-    fn handle_summary(&mut self, _key: KeyEvent) {
-        self.should_exit = true;
+    fn handle_summary(&mut self, key: KeyEvent) {
+        if key.code == KeyCode::Char('q') {
+            self.should_exit = true;
+        } else {
+            // Go back to deck selection
+            self.phase = Phase::DeckSelection;
+            self.load_deck_info().ok();
+        }
     }
 
     /// Handle paused input (pause/quit keybinds handled globally in handle_events)
