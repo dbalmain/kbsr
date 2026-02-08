@@ -1,4 +1,4 @@
-![kbsr](./assets/kbsr-logo.png)]
+![kbsr](./assets/kbsr-logo.png)
 
 **Keybind Spaced Repetition** - Learn keyboard shortcuts by actually typing them, with spaced repetition scheduling.
 
