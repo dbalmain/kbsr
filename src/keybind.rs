@@ -62,8 +62,7 @@ impl Chord {
                     // Raw mode: check if Shift+lowercase produces this char
                     if event.modifiers == KeyModifiers::SHIFT {
                         // For uppercase letters: Shift+g should match 'G'
-                        if expected.is_ascii_uppercase()
-                            && *actual == expected.to_ascii_lowercase()
+                        if expected.is_ascii_uppercase() && *actual == expected.to_ascii_lowercase()
                         {
                             return true;
                         }
@@ -175,7 +174,9 @@ fn parse_key_code(s: &str) -> Result<KeyCode> {
         "menu" => KeyCode::Menu,
         // Function keys
         s if s.starts_with('f') => {
-            let num: u8 = s[1..].parse().map_err(|_| anyhow::anyhow!("Invalid function key: {}", s))?;
+            let num: u8 = s[1..]
+                .parse()
+                .map_err(|_| anyhow::anyhow!("Invalid function key: {}", s))?;
             KeyCode::F(num)
         }
         _ => bail!("Unknown key: {}", s),

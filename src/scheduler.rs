@@ -19,11 +19,7 @@ impl Rating {
     /// Derive rating from response time, attempts, and presentation count
     /// This is called when the user got the answer correct on first attempt
     /// presentation_count: how many times the card was shown before getting it right first try
-    pub fn from_performance(
-        response_time_ms: u64,
-        attempts: u8,
-        presentation_count: i32,
-    ) -> Self {
+    pub fn from_performance(response_time_ms: u64, attempts: u8, presentation_count: i32) -> Self {
         // If they needed multiple presentations to get it right, cap at Hard
         // (even if they were fast this time, they struggled before)
         if presentation_count > 0 {
@@ -75,7 +71,6 @@ impl Scheduler {
         })
     }
 
-
     /// Get next states for a card
     /// Returns NextStates for scheduling
     pub fn get_next_states(
@@ -91,9 +86,9 @@ impl Scheduler {
             None => 0,
         };
 
-        let next_states = self
-            .fsrs
-            .next_states(memory_state, self.desired_retention, elapsed_days)?;
+        let next_states =
+            self.fsrs
+                .next_states(memory_state, self.desired_retention, elapsed_days)?;
 
         Ok(next_states)
     }

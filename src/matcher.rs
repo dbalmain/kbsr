@@ -103,7 +103,6 @@ impl Matcher {
             MatchState::InProgress(self.typed.clone())
         }
     }
-
 }
 
 #[cfg(test)]

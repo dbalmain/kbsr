@@ -17,6 +17,11 @@ use crossterm::execute;
 use std::io::stdout;
 
 fn main() -> Result<()> {
+    if std::env::args().any(|a| a == "--version" || a == "-V") {
+        println!("kbsr {}", env!("CARGO_PKG_VERSION"));
+        return Ok(());
+    }
+
     // Warn if running inside tmux - it may intercept keybindings
     if std::env::var("TMUX").is_ok() {
         eprintln!("Warning: Running inside tmux. Some keybindings (like Ctrl+K) may be");

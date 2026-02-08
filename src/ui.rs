@@ -1,11 +1,11 @@
 use crate::matcher::MatchState;
 use crate::storage::DeckStats;
 use ratatui::{
+    Frame,
     layout::{Alignment, Constraint, Layout},
     style::{Color, Style},
     text::{Line, Span},
     widgets::Paragraph,
-    Frame,
 };
 
 /// UI state for rendering

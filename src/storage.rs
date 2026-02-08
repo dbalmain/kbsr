@@ -41,8 +41,12 @@ fn row_to_stored_card(row: &rusqlite::Row) -> rusqlite::Result<StoredCard> {
         description: row.get(3)?,
         stability: row.get(4)?,
         difficulty: row.get(5)?,
-        due_date: row.get::<_, Option<String>>(6)?.and_then(|s| s.parse().ok()),
-        last_review: row.get::<_, Option<String>>(7)?.and_then(|s| s.parse().ok()),
+        due_date: row
+            .get::<_, Option<String>>(6)?
+            .and_then(|s| s.parse().ok()),
+        last_review: row
+            .get::<_, Option<String>>(7)?
+            .and_then(|s| s.parse().ok()),
         review_count: row.get(8)?,
         current_presentation_count: row.get(9)?,
     })
@@ -230,7 +234,10 @@ impl Storage {
 
     /// Get all decks with card counts (due = due by end of today)
     /// keyboard_modes maps deck name to its KeyboardMode (from TSV files)
-    pub fn get_deck_stats(&self, keyboard_modes: &std::collections::HashMap<String, KeyboardMode>) -> Result<Vec<DeckStats>> {
+    pub fn get_deck_stats(
+        &self,
+        keyboard_modes: &std::collections::HashMap<String, KeyboardMode>,
+    ) -> Result<Vec<DeckStats>> {
         let mut stmt = self.conn.prepare(
             "SELECT deck, COUNT(*), SUM(CASE WHEN due_date IS NULL OR due_date <= ?1 THEN 1 ELSE 0 END)
              FROM cards GROUP BY deck ORDER BY deck",
@@ -271,11 +278,13 @@ impl Storage {
                     rating: row.get(2)?,
                     response_time_ms: row.get(3)?,
                     attempts: row.get(4)?,
-                    reviewed_at: row.get::<_, String>(5)?
-                        .parse()
-                        .map_err(|e| rusqlite::Error::FromSqlConversionFailure(
-                            5, rusqlite::types::Type::Text, Box::new(e),
-                        ))?,
+                    reviewed_at: row.get::<_, String>(5)?.parse().map_err(|e| {
+                        rusqlite::Error::FromSqlConversionFailure(
+                            5,
+                            rusqlite::types::Type::Text,
+                            Box::new(e),
+                        )
+                    })?,
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;
@@ -298,7 +307,11 @@ impl Storage {
 
     /// Delete cards from a deck that are not in the given set of keybinds.
     /// Returns the number of cards deleted.
-    pub fn delete_removed_cards(&self, deck: &str, keep_keybinds: &HashSet<String>) -> Result<usize> {
+    pub fn delete_removed_cards(
+        &self,
+        deck: &str,
+        keep_keybinds: &HashSet<String>,
+    ) -> Result<usize> {
         let existing = self.get_deck_keybinds(deck)?;
         let to_delete: Vec<_> = existing.difference(keep_keybinds).collect();
 

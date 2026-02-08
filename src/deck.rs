@@ -99,7 +99,11 @@ impl Deck {
             });
         }
 
-        Ok(Deck { name, cards, keyboard_mode })
+        Ok(Deck {
+            name,
+            cards,
+            keyboard_mode,
+        })
     }
 }
 

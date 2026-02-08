@@ -366,8 +366,7 @@ impl App {
                     study.attempts += 1;
                     if study.attempts >= self.config.max_attempts {
                         study.answer_revealed = true;
-                        study.matcher =
-                            Matcher::new(study.cards[study.card_idx].keybind.clone());
+                        study.matcher = Matcher::new(study.cards[study.card_idx].keybind.clone());
                         return Ok(());
                     }
                 }
