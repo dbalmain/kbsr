@@ -391,12 +391,12 @@ impl App {
                 }
 
                 match self.phase {
-                    Phase::DeckSelection => self.handle_deck_selection(key),
+                    Phase::DeckSelection => self.handle_deck_selection(key)?,
                     Phase::Studying => self.handle_studying(key)?,
                     Phase::ShowingSuccess => {} // Ignore input during success display
                     Phase::ShowingAnswer => self.handle_showing_answer(key)?,
                     Phase::Paused => self.handle_paused(key),
-                    Phase::Summary => self.handle_summary(key),
+                    Phase::Summary => self.handle_summary(key)?,
                 }
             }
         } else {
@@ -410,7 +410,7 @@ impl App {
     }
 
     /// Handle deck selection input
-    fn handle_deck_selection(&mut self, key: KeyEvent) {
+    fn handle_deck_selection(&mut self, key: KeyEvent) -> Result<()> {
         match key.code {
             KeyCode::Up | KeyCode::Char('k') => {
                 if self.selected_deck_idx > 0 {
@@ -423,13 +423,14 @@ impl App {
                 }
             }
             KeyCode::Enter => {
-                let _ = self.start_studying();
+                self.start_studying()?;
             }
             KeyCode::Esc | KeyCode::Char('q') => {
                 self.should_exit = true;
             }
             _ => {}
         }
+        Ok(())
     }
 
     /// Handle studying input
@@ -500,14 +501,14 @@ impl App {
     }
 
     /// Handle summary input
-    fn handle_summary(&mut self, key: KeyEvent) {
+    fn handle_summary(&mut self, key: KeyEvent) -> Result<()> {
         if key.code == KeyCode::Char('q') {
             self.should_exit = true;
         } else {
-            // Go back to deck selection
             self.phase = Phase::DeckSelection;
-            self.load_deck_info().ok();
+            self.load_deck_info()?;
         }
+        Ok(())
     }
 
     /// Handle paused input (pause/quit keybinds handled globally in handle_events)
