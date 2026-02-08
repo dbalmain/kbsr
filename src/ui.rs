@@ -37,8 +37,8 @@ pub fn render(frame: &mut Frame, state: &UiState) {
         Constraint::Length(3), // Clue area
         Constraint::Length(2), // Typed keys area
         Constraint::Length(1), // Spacer before answer/message
-        Constraint::Length(1), // Answer area (when showing)
-        Constraint::Length(1), // Message/checkmark area
+        Constraint::Length(1), // Answer or checkmark area
+        Constraint::Length(1), // Message area
         Constraint::Fill(1),   // Bottom spacer
     ])
     .split(area);

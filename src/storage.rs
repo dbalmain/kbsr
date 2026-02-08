@@ -84,6 +84,8 @@ impl Storage {
         let conn = Connection::open(path)
             .with_context(|| format!("Failed to open database: {}", path.display()))?;
 
+        conn.pragma_update(None, "foreign_keys", "ON")?;
+
         let storage = Storage { conn };
         storage.init_schema()?;
 
@@ -269,7 +271,11 @@ impl Storage {
                     rating: row.get(2)?,
                     response_time_ms: row.get(3)?,
                     attempts: row.get(4)?,
-                    reviewed_at: row.get::<_, String>(5)?.parse().unwrap(),
+                    reviewed_at: row.get::<_, String>(5)?
+                        .parse()
+                        .map_err(|e| rusqlite::Error::FromSqlConversionFailure(
+                            5, rusqlite::types::Type::Text, Box::new(e),
+                        ))?,
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;
