@@ -1,6 +1,6 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
@@ -20,11 +20,11 @@ pub struct Config {
     #[serde(default = "default_failed_flash_delay")]
     pub failed_flash_delay_ms: u64,
 
-    /// Keybind to pause the app (default: "Super+Ctrl+Shift+P")
+    /// Keybind to pause the app (default: "Super+Ctrl+P")
     #[serde(default = "default_pause_keybind")]
     pub pause_keybind: String,
 
-    /// Keybind to quit the app (default: "Super+Ctrl+Shift+Q")
+    /// Keybind to quit the app (default: "Super+Ctrl+Q")
     #[serde(default = "default_quit_keybind")]
     pub quit_keybind: String,
 
@@ -62,11 +62,11 @@ fn default_failed_flash_delay() -> u64 {
 }
 
 fn default_pause_keybind() -> String {
-    "Super+Ctrl+Shift+P".to_string()
+    "Super+Ctrl+P".to_string()
 }
 
 fn default_quit_keybind() -> String {
-    "Super+Ctrl+Shift+Q".to_string()
+    "Super+Ctrl+Q".to_string()
 }
 
 fn default_shuffle_cards() -> bool {
@@ -106,6 +106,15 @@ impl Default for Config {
     }
 }
 
+fn expand_tilde(path: &Path) -> PathBuf {
+    if let Ok(suffix) = path.strip_prefix("~")
+        && let Some(home) = dirs::home_dir()
+    {
+        return home.join(suffix);
+    }
+    path.to_path_buf()
+}
+
 impl Config {
     /// Load config from file or return defaults
     pub fn load() -> Result<Self> {
@@ -113,7 +122,9 @@ impl Config {
 
         if config_path.exists() {
             let content = std::fs::read_to_string(&config_path)?;
-            let config: Config = toml::from_str(&content)?;
+            let mut config: Config = toml::from_str(&content)?;
+            config.decks_dir = expand_tilde(&config.decks_dir);
+            config.db_path = expand_tilde(&config.db_path);
             Ok(config)
         } else {
             Ok(Config::default())

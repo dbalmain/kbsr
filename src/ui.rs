@@ -84,7 +84,7 @@ pub fn render(frame: &mut Frame, state: &UiState) {
             Style::default().fg(Color::Green),
         )))
         .alignment(Alignment::Center);
-        frame.render_widget(checkmark, chunks[6]);
+        frame.render_widget(checkmark, chunks[5]);
     }
 }
 

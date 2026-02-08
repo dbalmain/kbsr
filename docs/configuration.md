@@ -1,0 +1,52 @@
+# Configuration
+
+Configuration is optional. All settings have sensible defaults. To customize, create `~/.config/kbsr/config.toml`:
+
+```toml
+# Timeout in seconds before marking as incorrect (default: 5)
+# After timeout, you can keep trying but the card won't count as "first try correct"
+timeout_secs = 5
+
+# Maximum attempts before revealing the answer (default: 3)
+max_attempts = 3
+
+# Delay in ms to show success checkmark (default: 500)
+success_delay_ms = 500
+
+# Delay in ms to show red failed flash before retry (default: 500)
+failed_flash_delay_ms = 500
+
+# Keybind to pause during study (default: "Super+Ctrl+P")
+# Uses obscure modifier combo to avoid conflicting with keybinds you're learning
+pause_keybind = "Super+Ctrl+P"
+
+# Keybind to quit the app (default: "Super+Ctrl+Q")
+quit_keybind = "Super+Ctrl+Q"
+
+# Shuffle cards before each session (default: true)
+shuffle_cards = true
+
+# FSRS desired retention rate 0.0-1.0 (default: 0.9)
+# Higher = more frequent reviews, better retention
+# Lower = fewer reviews, more forgetting
+desired_retention = 0.9
+
+# Custom paths (optional, defaults to XDG directories)
+# decks_dir = "/path/to/decks"
+# db_path = "/path/to/kbsr.db"
+```
+
+## Settings Reference
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `timeout_secs` | `5` | Seconds before auto-marking card as incorrect |
+| `max_attempts` | `3` | Wrong attempts before answer is revealed |
+| `success_delay_ms` | `500` | How long the green checkmark is shown |
+| `failed_flash_delay_ms` | `500` | How long wrong input flashes red before retry |
+| `pause_keybind` | `Super+Ctrl+P` | Chord to pause the session |
+| `quit_keybind` | `Super+Ctrl+Q` | Chord to quit from any screen |
+| `shuffle_cards` | `true` | Randomize card order each session |
+| `desired_retention` | `0.9` | Target recall probability for FSRS scheduling |
+| `decks_dir` | `~/.config/kbsr/decks` | Where deck TSV files are stored |
+| `db_path` | `~/.local/share/kbsr/kbsr.db` | SQLite database location |
