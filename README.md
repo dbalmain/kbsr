@@ -19,14 +19,15 @@ Built with Rust and [ratatui](https://github.com/ratatui/ratatui), using the [FS
 ## Installation
 
 ```bash
-cargo install --path .
+cargo install kbsr
 ```
 
 Or build from source:
 
 ```bash
-cargo build --release
-./target/release/kbsr
+git clone https://github.com/dbalmain/kbsr.git
+cd kbsr
+cargo install --path .
 ```
 
 ## Quick Start
