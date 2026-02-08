@@ -52,12 +52,12 @@ cargo install --path .
 
 1. Create a deck file at `~/.config/kbsr/decks/my-shortcuts.tsv`:
 
-```tsv
+<pre style="tab-size: 20;">
 Ctrl+S	Save file
 Ctrl+Z	Undo
 Ctrl+Shift+Z	Redo
 g g	Go to top of file
-```
+</pre>
 
 2. Run `kbsr`, select your deck, and start typing keybinds.
 
