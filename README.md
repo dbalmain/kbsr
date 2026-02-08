@@ -26,6 +26,14 @@ cargo install kbsr
 
 ### Nix
 
+For pre-built binaries, add the cache first (optional, avoids compiling from source):
+
+```bash
+cachix use kbsr
+```
+
+Then install:
+
 ```bash
 nix run github:dbalmain/kbsr
 # or install persistently
