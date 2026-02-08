@@ -56,7 +56,7 @@ pub fn render(frame: &mut Frame, state: &UiState) {
     frame.render_widget(clue, chunks[2]);
 
     // Render typed keys with appropriate color
-    let typed_line = render_typed_chords(state.match_state, state.showing_answer);
+    let typed_line = render_typed_chords(state.match_state);
     let typed = Paragraph::new(typed_line).alignment(Alignment::Center);
     frame.render_widget(typed, chunks[3]);
 
@@ -89,7 +89,7 @@ pub fn render(frame: &mut Frame, state: &UiState) {
 }
 
 /// Render the typed chords with appropriate coloring
-fn render_typed_chords(state: &MatchState, _showing_answer: bool) -> Line<'static> {
+fn render_typed_chords(state: &MatchState) -> Line<'static> {
     let chords = state.typed_chords();
 
     if chords.is_empty() {

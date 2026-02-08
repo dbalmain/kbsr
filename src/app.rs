@@ -7,28 +7,16 @@ use crate::storage::{DeckStats, Storage, StoredCard};
 use crate::ui;
 use anyhow::Result;
 use crossterm::event::{
-    self, Event, KeyCode, KeyEvent, KeyEventKind,
-    KeyboardEnhancementFlags, PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
+    self, Event, KeyCode, KeyEvent, KeyEventKind, KeyboardEnhancementFlags,
+    PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
 };
 use crossterm::execute;
+use rand::seq::SliceRandom;
 use ratatui::{DefaultTerminal, Frame};
 use std::collections::HashSet;
 use std::io::stdout;
-use rand::seq::SliceRandom;
 use std::time::{Duration, Instant};
 
-/// Application state phases
-#[derive(Debug, Clone, PartialEq)]
-enum Phase {
-    DeckSelection,
-    Studying,
-    ShowingSuccess,
-    ShowingAnswer,
-    Paused,
-    Summary,
-}
-
-/// Study session statistics
 struct SessionStats {
     reviewed: usize,
     correct: usize,
@@ -36,45 +24,60 @@ struct SessionStats {
     end_time: Option<Instant>,
 }
 
-/// Main application state
-pub struct App {
-    config: Config,
-    storage: Storage,
-    scheduler: Scheduler,
-    phase: Phase,
-    // Deck selection state
-    available_decks: Vec<DeckStats>,
-    selected_deck_idx: usize,
-    // Study state
-    current_cards: Vec<StudyCard>,
-    current_card_idx: usize,
-    matcher: Option<Matcher>,
-    card_start_time: Instant,
-    attempts: u8,
-    first_attempt_failed: bool,
-    failed_display_until: Option<Instant>,
-    success_display_until: Option<Instant>,
-    // Keyboard mode for current study session
-    current_keyboard_mode: Option<KeyboardMode>,
-    // Pause state
-    pause_chord: Option<Chord>,
-    quit_chord: Option<Chord>,
-    phase_before_pause: Option<Phase>,
-    pause_start: Option<Instant>,
-    // Session stats
-    stats: SessionStats,
-    // Exit flag
-    should_exit: bool,
-}
-
-/// A card being studied with its storage info
 struct StudyCard {
     stored: StoredCard,
     keybind: Keybind,
 }
 
+struct DeckSelectionState {
+    available_decks: Vec<DeckStats>,
+}
+
+struct StudyState {
+    cards: Vec<StudyCard>,
+    card_idx: usize,
+    matcher: Matcher,
+    card_start_time: Instant,
+    attempts: u8,
+    first_attempt_failed: bool,
+    answer_revealed: bool,
+    failed_display_until: Option<Instant>,
+    success_display_until: Option<Instant>,
+    stats: SessionStats,
+}
+
+struct PausedState {
+    previous: Box<AppState>,
+    started_at: Instant,
+}
+
+struct SummaryState {
+    stats: SessionStats,
+}
+
+#[derive(Default)]
+enum AppState {
+    #[default]
+    Idle,
+    DeckSelection(DeckSelectionState),
+    Studying(StudyState),
+    Paused(PausedState),
+    Summary(SummaryState),
+}
+
+pub struct App {
+    config: Config,
+    storage: Storage,
+    scheduler: Scheduler,
+    pause_chord: Option<Chord>,
+    quit_chord: Option<Chord>,
+    should_exit: bool,
+    current_keyboard_mode: Option<KeyboardMode>,
+    selected_deck_idx: usize,
+    state: AppState,
+}
+
 impl App {
-    /// Create a new application
     pub fn new(config: Config) -> Result<Self> {
         config.ensure_dirs()?;
         let storage = Storage::open(&config.db_path)?;
@@ -87,38 +90,20 @@ impl App {
             config,
             storage,
             scheduler,
-            phase: Phase::DeckSelection,
-            available_decks: Vec::new(),
-            selected_deck_idx: 0,
-            current_cards: Vec::new(),
-            current_card_idx: 0,
-            matcher: None,
-            card_start_time: Instant::now(),
-            attempts: 0,
-            first_attempt_failed: false,
-            failed_display_until: None,
-            success_display_until: None,
-            current_keyboard_mode: None,
             pause_chord,
             quit_chord,
-            phase_before_pause: None,
-            pause_start: None,
-            stats: SessionStats {
-                reviewed: 0,
-                correct: 0,
-                start_time: Instant::now(),
-                end_time: None,
-            },
             should_exit: false,
+            current_keyboard_mode: None,
+            selected_deck_idx: 0,
+            state: AppState::DeckSelection(DeckSelectionState {
+                available_decks: Vec::new(),
+            }),
         })
     }
 
-    /// Run the application
     pub fn run(mut self, terminal: &mut DefaultTerminal) -> Result<()> {
-        // Load deck info
         self.load_deck_info()?;
 
-        // Main event loop
         while !self.should_exit {
             terminal.draw(|frame| self.render(frame))?;
             self.handle_events()?;
@@ -127,7 +112,6 @@ impl App {
         Ok(())
     }
 
-    /// Load deck information from files and database
     fn load_deck_info(&mut self) -> Result<()> {
         use crate::deck::KeyboardMode;
         use std::collections::HashMap;
@@ -138,52 +122,43 @@ impl App {
         let mut active_decks = HashSet::new();
         let mut keyboard_modes: HashMap<String, KeyboardMode> = HashMap::new();
 
-        // Load each deck and sync with database
         for path in deck_files {
             let deck = Deck::load(&path)?;
             active_decks.insert(deck.name.clone());
             keyboard_modes.insert(deck.name.clone(), deck.keyboard_mode);
 
-            // Collect keybinds in this deck file
             let mut deck_keybinds = HashSet::new();
 
-            // Upsert all cards
             for card in &deck.cards {
                 let keybind_str = card.keybind.to_string();
                 deck_keybinds.insert(keybind_str.clone());
-                self.storage.upsert_card(
-                    &deck.name,
-                    &keybind_str,
-                    &card.description,
-                )?;
+                self.storage
+                    .upsert_card(&deck.name, &keybind_str, &card.description)?;
             }
 
-            // Delete cards that are no longer in the deck file
-            self.storage.delete_removed_cards(&deck.name, &deck_keybinds)?;
+            self.storage
+                .delete_removed_cards(&deck.name, &deck_keybinds)?;
         }
 
-        // Delete decks that no longer have TSV files
         self.storage.delete_orphaned_decks(&active_decks)?;
 
-        // Get deck stats from database
-        self.available_decks = self.storage.get_deck_stats(&keyboard_modes)?;
+        let available_decks = self.storage.get_deck_stats(&keyboard_modes)?;
+
+        self.selected_deck_idx = self.selected_deck_idx.min(available_decks.len());
+        self.state = AppState::DeckSelection(DeckSelectionState { available_decks });
 
         Ok(())
     }
 
-    /// Push keyboard enhancement flags for a specific mode
     fn push_keyboard_mode(&mut self, mode: KeyboardMode) {
-        // Pop any existing mode first
         self.pop_keyboard_mode();
 
         let flags = match mode {
             KeyboardMode::Raw => {
-                // Raw mode: no REPORT_ALTERNATE_KEYS, get Shift+1 as-is
                 KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES
                     | KeyboardEnhancementFlags::REPORT_ALL_KEYS_AS_ESCAPE_CODES
             }
             KeyboardMode::Chars => {
-                // Character mode: with REPORT_ALTERNATE_KEYS, get '!' from Shift+1
                 KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES
                     | KeyboardEnhancementFlags::REPORT_ALL_KEYS_AS_ESCAPE_CODES
                     | KeyboardEnhancementFlags::REPORT_ALTERNATE_KEYS
@@ -194,7 +169,6 @@ impl App {
         self.current_keyboard_mode = Some(mode);
     }
 
-    /// Pop keyboard enhancement flags if we pushed them
     fn pop_keyboard_mode(&mut self) {
         if self.current_keyboard_mode.is_some() {
             let _ = execute!(stdout(), PopKeyboardEnhancementFlags);
@@ -202,110 +176,40 @@ impl App {
         }
     }
 
-    /// Start studying the selected deck(s)
-    fn start_studying(&mut self) -> Result<()> {
-        self.current_cards.clear();
-        self.current_card_idx = 0;
-        self.stats = SessionStats {
-            reviewed: 0,
-            correct: 0,
-            start_time: Instant::now(),
-            end_time: None,
-        };
-
-        // Determine keyboard mode for this session
-        let keyboard_mode = if self.selected_deck_idx < self.available_decks.len() {
-            // Single deck - use its mode
-            let deck = &self.available_decks[self.selected_deck_idx];
-            let mode = deck.keyboard_mode;
-            self.load_due_cards(&deck.name.clone())?;
-            mode
-        } else {
-            // All decks - default to Raw (most compatible)
-            for deck in self.available_decks.clone() {
-                self.load_due_cards(&deck.name)?;
-            }
-            KeyboardMode::Raw
-        };
-
-        if self.current_cards.is_empty() {
-            // No cards due
-            self.stats.end_time = Some(Instant::now());
-            self.phase = Phase::Summary;
-        } else {
-            // Push keyboard mode for this session
-            self.push_keyboard_mode(keyboard_mode);
-
-            // Randomize card order to avoid sequence-based hints
-            if self.config.shuffle_cards {
-                self.current_cards.shuffle(&mut rand::rng());
-            }
-            self.phase = Phase::Studying;
-            self.setup_current_card();
-        }
-
-        Ok(())
-    }
-
-    /// Load due cards for a deck
-    fn load_due_cards(&mut self, deck_name: &str) -> Result<()> {
-        let stored_cards = self.storage.get_due_cards(deck_name)?;
-
-        for stored in stored_cards {
-            if let Ok(keybind) = Keybind::parse(&stored.keybind) {
-                self.current_cards.push(StudyCard { stored, keybind });
-            }
-        }
-
-        Ok(())
-    }
-
-    /// Set up the current card for study
-    fn setup_current_card(&mut self) {
-        if self.current_card_idx < self.current_cards.len() {
-            let card = &self.current_cards[self.current_card_idx];
-            self.matcher = Some(Matcher::new(card.keybind.clone()));
-            self.card_start_time = Instant::now();
-            self.attempts = 0;
-            self.first_attempt_failed = false;
-        }
-    }
-
-    /// Render the UI
     fn render(&self, frame: &mut Frame) {
-        match self.phase {
-            Phase::DeckSelection => {
-                ui::render_deck_selection(frame, &self.available_decks, self.selected_deck_idx);
+        match &self.state {
+            AppState::Idle => unreachable!(),
+            AppState::DeckSelection(s) => {
+                ui::render_deck_selection(frame, &s.available_decks, self.selected_deck_idx);
             }
-            Phase::Studying | Phase::ShowingSuccess | Phase::ShowingAnswer => {
-                if let Some(card) = self.current_cards.get(self.current_card_idx) {
-                    let matcher = self.matcher.as_ref().unwrap();
-                    let match_state = matcher.state();
+            AppState::Studying(s) => {
+                if let Some(card) = s.cards.get(s.card_idx) {
+                    let match_state = s.matcher.state();
 
-                    let message = if self.phase == Phase::ShowingAnswer {
+                    let message = if s.answer_revealed {
                         Some("Type the answer to continue")
-                    } else if self.phase == Phase::Studying
-                        && self.card_start_time.elapsed()
-                            >= Duration::from_secs(self.config.timeout_secs)
+                    } else if s.card_start_time.elapsed()
+                        >= Duration::from_secs(self.config.timeout_secs)
                     {
                         Some("Time's up! Keep trying...")
                     } else {
                         None
                     };
 
+                    let answer_str = card.keybind.to_string();
                     let ui_state = ui::UiState {
                         deck: &card.stored.deck,
                         clue: &card.stored.description,
                         match_state: &match_state,
-                        showing_answer: self.phase == Phase::ShowingAnswer,
-                        answer: &card.keybind.to_string(),
+                        showing_answer: s.answer_revealed,
+                        answer: &answer_str,
                         message,
-                        show_success_checkmark: self.phase == Phase::ShowingSuccess,
+                        show_success_checkmark: s.success_display_until.is_some(),
                     };
                     ui::render(frame, &ui_state);
                 }
             }
-            Phase::Paused => {
+            AppState::Paused(_) => {
                 let keybind_str = self
                     .pause_chord
                     .as_ref()
@@ -313,63 +217,49 @@ impl App {
                     .unwrap_or_else(|| "pause keybind".to_string());
                 ui::render_paused(frame, &keybind_str);
             }
-            Phase::Summary => {
-                let elapsed = self
+            AppState::Summary(s) => {
+                let elapsed = s
                     .stats
                     .end_time
-                    .map(|end| end.duration_since(self.stats.start_time))
-                    .unwrap_or_else(|| self.stats.start_time.elapsed());
-                ui::render_summary(
-                    frame,
-                    self.stats.reviewed,
-                    self.stats.correct,
-                    elapsed.as_secs(),
-                );
+                    .map(|end| end.duration_since(s.stats.start_time))
+                    .unwrap_or_else(|| s.stats.start_time.elapsed());
+                ui::render_summary(frame, s.stats.reviewed, s.stats.correct, elapsed.as_secs());
             }
         }
     }
 
-    /// Handle input events
     fn handle_events(&mut self) -> Result<()> {
-        // Check if we're in failed display period
-        if let Some(until) = self.failed_display_until {
-            if Instant::now() >= until {
-                // Time expired, reset matcher now
-                if let Some(matcher) = &mut self.matcher {
-                    matcher.reset();
+        if let AppState::Studying(ref mut study) = self.state {
+            if let Some(until) = study.failed_display_until {
+                if Instant::now() >= until {
+                    study.matcher.reset();
+                    study.failed_display_until = None;
+                } else {
+                    let _ = event::poll(Duration::from_millis(50));
+                    return Ok(());
                 }
-                self.failed_display_until = None;
-            } else {
-                // Still showing failed state, just poll without processing
-                let _ = event::poll(Duration::from_millis(50));
-                return Ok(());
+            }
+
+            if let Some(until) = study.success_display_until {
+                if Instant::now() >= until {
+                    let AppState::Studying(mut study) = std::mem::take(&mut self.state) else {
+                        unreachable!()
+                    };
+                    study.success_display_until = None;
+                    self.next_card(study)?;
+                } else {
+                    let _ = event::poll(Duration::from_millis(50));
+                    return Ok(());
+                }
             }
         }
 
-        // Check if we're in success display period
-        if self.phase == Phase::ShowingSuccess
-            && let Some(until) = self.success_display_until
-        {
-            if Instant::now() >= until {
-                // Time expired, move to next card
-                self.success_display_until = None;
-                self.next_card()?;
-            } else {
-                // Still showing success state, just poll without processing
-                let _ = event::poll(Duration::from_millis(50));
-                return Ok(());
-            }
-        }
-
-        // Poll with timeout for time-based checks
         if event::poll(Duration::from_millis(100))? {
             if let Event::Key(key) = event::read()? {
-                // Only handle key press events
                 if key.kind != KeyEventKind::Press {
                     return Ok(());
                 }
 
-                // Check for quit keybind (works in any phase)
                 if let Some(ref quit_chord) = self.quit_chord
                     && quit_chord.matches(&key)
                 {
@@ -377,40 +267,40 @@ impl App {
                     return Ok(());
                 }
 
-                // Check for pause keybind (except in DeckSelection and Summary)
                 if let Some(ref pause_chord) = self.pause_chord
                     && pause_chord.matches(&key)
                 {
-                    if self.phase == Phase::Paused {
+                    if matches!(self.state, AppState::Paused(_)) {
                         self.resume();
                         return Ok(());
-                    } else if self.phase != Phase::DeckSelection && self.phase != Phase::Summary {
+                    } else if !matches!(
+                        self.state,
+                        AppState::DeckSelection(_) | AppState::Summary(_)
+                    ) {
                         self.pause();
                         return Ok(());
                     }
                 }
 
-                match self.phase {
-                    Phase::DeckSelection => self.handle_deck_selection(key)?,
-                    Phase::Studying => self.handle_studying(key)?,
-                    Phase::ShowingSuccess => {} // Ignore input during success display
-                    Phase::ShowingAnswer => self.handle_showing_answer(key)?,
-                    Phase::Paused => self.handle_paused(key),
-                    Phase::Summary => self.handle_summary(key)?,
+                match &self.state {
+                    AppState::Idle => unreachable!(),
+                    AppState::DeckSelection(_) => self.handle_deck_selection_key(key)?,
+                    AppState::Studying(_) => self.handle_studying_key(key)?,
+                    AppState::Paused(_) => {}
+                    AppState::Summary(_) => self.handle_summary_key(key)?,
                 }
             }
-        } else {
-            // Check for timeout in studying phase
-            if self.phase == Phase::Studying {
-                self.check_timeout()?;
-            }
+        } else if let AppState::Studying(ref mut study) = self.state {
+            Self::check_timeout(study, self.config.timeout_secs);
         }
 
         Ok(())
     }
 
-    /// Handle deck selection input
-    fn handle_deck_selection(&mut self, key: KeyEvent) -> Result<()> {
+    fn handle_deck_selection_key(&mut self, key: KeyEvent) -> Result<()> {
+        let AppState::DeckSelection(ref mut s) = self.state else {
+            return Ok(());
+        };
         match key.code {
             KeyCode::Up | KeyCode::Char('k') => {
                 if self.selected_deck_idx > 0 {
@@ -418,12 +308,14 @@ impl App {
                 }
             }
             KeyCode::Down | KeyCode::Char('j') => {
-                if self.selected_deck_idx < self.available_decks.len() {
+                if self.selected_deck_idx < s.available_decks.len() {
                     self.selected_deck_idx += 1;
                 }
             }
             KeyCode::Enter => {
-                self.start_studying()?;
+                if let AppState::DeckSelection(ds) = std::mem::take(&mut self.state) {
+                    self.start_studying(ds)?;
+                };
             }
             KeyCode::Esc | KeyCode::Char('q') => {
                 self.should_exit = true;
@@ -433,159 +325,177 @@ impl App {
         Ok(())
     }
 
-    /// Handle studying input
-    fn handle_studying(&mut self, key: KeyEvent) -> Result<()> {
-        // Escape reveals the answer (counts as failed first attempt)
-        if key.code == KeyCode::Esc {
-            self.first_attempt_failed = true;
-            self.reveal_answer()?;
+    fn handle_studying_key(&mut self, key: KeyEvent) -> Result<()> {
+        let AppState::Studying(ref mut study) = self.state else {
             return Ok(());
-        }
+        };
 
-        self.process_keybind_input(key, false)
-    }
-
-    /// Handle showing answer input
-    fn handle_showing_answer(&mut self, key: KeyEvent) -> Result<()> {
-        self.process_keybind_input(key, true)
-    }
-
-    /// Common input processing for both studying and showing answer phases
-    fn process_keybind_input(&mut self, key: KeyEvent, answer_revealed: bool) -> Result<()> {
-        // Ignore modifier-only key presses (Ctrl, Alt, Shift by themselves)
         if matches!(key.code, KeyCode::Modifier(_)) {
             return Ok(());
         }
 
-        // Process the key
-        if let Some(matcher) = &mut self.matcher {
-            let state = matcher.process(key);
+        // Escape reveals the answer (only when not already revealed)
+        if key.code == KeyCode::Esc && !study.answer_revealed {
+            study.first_attempt_failed = true;
+            study.answer_revealed = true;
+            study.matcher = Matcher::new(study.cards[study.card_idx].keybind.clone());
+            return Ok(());
+        }
 
-            match state {
-                MatchState::Complete(_) => {
-                    if !answer_revealed {
-                        self.attempts += 1;
-                        if !self.first_attempt_failed {
-                            // Got it right on first attempt! Score the card
-                            self.score_card()?;
-                        }
+        let result = study.matcher.process(key);
+
+        match result {
+            MatchState::Complete(_) => {
+                if !study.answer_revealed {
+                    study.attempts += 1;
+                    if !study.first_attempt_failed {
+                        self.score_card()?;
                     }
-                    // Always show success flash
-                    self.phase = Phase::ShowingSuccess;
-                    self.success_display_until =
-                        Some(Instant::now() + Duration::from_millis(self.config.success_delay_ms));
                 }
-                MatchState::Failed(_) => {
-                    if !answer_revealed {
-                        // Wrong - increment attempts (only during studying)
-                        if self.attempts == 0 {
-                            self.first_attempt_failed = true;
-                        }
-                        self.attempts += 1;
-                        if self.attempts >= self.config.max_attempts {
-                            self.reveal_answer()?;
-                            return Ok(());
-                        }
-                    }
-                    // Show failed state before allowing retry
-                    self.failed_display_until =
-                        Some(Instant::now() + Duration::from_millis(self.config.failed_flash_delay_ms));
-                }
-                MatchState::InProgress(_) => {
-                    // Keep going
-                }
+                let AppState::Studying(ref mut study) = self.state else {
+                    unreachable!()
+                };
+                study.success_display_until =
+                    Some(Instant::now() + Duration::from_millis(self.config.success_delay_ms));
             }
+            MatchState::Failed(_) => {
+                if !study.answer_revealed {
+                    if study.attempts == 0 {
+                        study.first_attempt_failed = true;
+                    }
+                    study.attempts += 1;
+                    if study.attempts >= self.config.max_attempts {
+                        study.answer_revealed = true;
+                        study.matcher =
+                            Matcher::new(study.cards[study.card_idx].keybind.clone());
+                        return Ok(());
+                    }
+                }
+                study.failed_display_until =
+                    Some(Instant::now() + Duration::from_millis(self.config.failed_flash_delay_ms));
+            }
+            MatchState::InProgress(_) => {}
         }
 
         Ok(())
     }
 
-    /// Handle summary input
-    fn handle_summary(&mut self, key: KeyEvent) -> Result<()> {
+    fn handle_summary_key(&mut self, key: KeyEvent) -> Result<()> {
         if key.code == KeyCode::Char('q') {
             self.should_exit = true;
         } else {
-            self.phase = Phase::DeckSelection;
             self.load_deck_info()?;
         }
         Ok(())
     }
 
-    /// Handle paused input (pause/quit keybinds handled globally in handle_events)
-    fn handle_paused(&mut self, _key: KeyEvent) {
-        // No additional input handling needed - pause toggle and quit are global
-    }
+    fn start_studying(&mut self, deck_selection: DeckSelectionState) -> Result<()> {
+        let mut cards = Vec::new();
+        let stats = SessionStats {
+            reviewed: 0,
+            correct: 0,
+            start_time: Instant::now(),
+            end_time: None,
+        };
 
-    /// Pause the app
-    fn pause(&mut self) {
-        self.phase_before_pause = Some(self.phase.clone());
-        self.pause_start = Some(Instant::now());
-        self.phase = Phase::Paused;
-    }
-
-    /// Resume from pause
-    fn resume(&mut self) {
-        if let Some(prev_phase) = self.phase_before_pause.take() {
-            // Add paused duration to card_start_time to avoid timeout during pause
-            if let Some(pause_start) = self.pause_start.take() {
-                let paused_duration = pause_start.elapsed();
-                self.card_start_time += paused_duration;
+        let keyboard_mode = if self.selected_deck_idx < deck_selection.available_decks.len() {
+            let deck = &deck_selection.available_decks[self.selected_deck_idx];
+            let mode = deck.keyboard_mode;
+            let name = deck.name.clone();
+            self.load_due_cards(&name, &mut cards)?;
+            mode
+        } else {
+            let deck_names: Vec<String> = deck_selection
+                .available_decks
+                .iter()
+                .map(|d| d.name.clone())
+                .collect();
+            for name in &deck_names {
+                self.load_due_cards(name, &mut cards)?;
             }
-            self.phase = prev_phase;
-        }
-    }
+            KeyboardMode::Raw
+        };
 
-    /// Check for timeout
-    fn check_timeout(&mut self) -> Result<()> {
-        let elapsed = self.card_start_time.elapsed();
-        let timeout = Duration::from_secs(self.config.timeout_secs);
+        if cards.is_empty() {
+            self.state = AppState::Summary(SummaryState {
+                stats: SessionStats {
+                    reviewed: 0,
+                    correct: 0,
+                    start_time: Instant::now(),
+                    end_time: Some(Instant::now()),
+                },
+            });
+        } else {
+            self.push_keyboard_mode(keyboard_mode);
 
-        if elapsed >= timeout && self.attempts == 0 {
-            // Auto-mark as failed attempt on first timeout
-            self.attempts = 1;
-            self.first_attempt_failed = true;
+            if self.config.shuffle_cards {
+                cards.shuffle(&mut rand::rng());
+            }
+
+            let matcher = Matcher::new(cards[0].keybind.clone());
+
+            self.state = AppState::Studying(StudyState {
+                cards,
+                card_idx: 0,
+                matcher,
+                card_start_time: Instant::now(),
+                attempts: 0,
+                first_attempt_failed: false,
+                answer_revealed: false,
+                failed_display_until: None,
+                success_display_until: None,
+                stats,
+            });
         }
 
         Ok(())
     }
 
-    /// Reveal the answer (scoring happens when user completes typing)
-    fn reveal_answer(&mut self) -> Result<()> {
-        self.phase = Phase::ShowingAnswer;
+    fn load_due_cards(&mut self, deck_name: &str, cards: &mut Vec<StudyCard>) -> Result<()> {
+        let stored_cards = self.storage.get_due_cards(deck_name)?;
 
-        // Reset matcher for typing the answer
-        if let Some(card) = self.current_cards.get(self.current_card_idx) {
-            self.matcher = Some(Matcher::new(card.keybind.clone()));
+        for stored in stored_cards {
+            if let Ok(keybind) = Keybind::parse(&stored.keybind) {
+                cards.push(StudyCard { stored, keybind });
+            }
         }
 
         Ok(())
     }
 
-    /// Score the current card (only called when user gets it right on first attempt)
+    fn setup_current_card(study: &mut StudyState) {
+        if let Some(card) = study.cards.get(study.card_idx) {
+            study.matcher = Matcher::new(card.keybind.clone());
+            study.card_start_time = Instant::now();
+            study.attempts = 0;
+            study.first_attempt_failed = false;
+            study.answer_revealed = false;
+        }
+    }
+
     fn score_card(&mut self) -> Result<()> {
-        if let Some(card) = self.current_cards.get(self.current_card_idx) {
-            let response_time_ms = self.card_start_time.elapsed().as_millis() as u64;
+        let AppState::Studying(ref mut study) = self.state else {
+            return Ok(());
+        };
+        if let Some(card) = study.cards.get(study.card_idx) {
+            let response_time_ms = study.card_start_time.elapsed().as_millis() as u64;
 
-            // Calculate rating based on performance and prior presentation count
             let rating = Rating::from_performance(
                 response_time_ms,
-                self.attempts,
+                study.attempts,
                 card.stored.current_presentation_count,
             );
 
-            // Get current memory state
             let memory_state = card.stored.stability.and_then(|s| {
                 card.stored
                     .difficulty
                     .map(|d| Scheduler::memory_state_from_stored(s, d))
             });
 
-            // Schedule next review
             let (new_memory, due_date) =
                 self.scheduler
                     .schedule(memory_state, card.stored.last_review, rating)?;
 
-            // Update storage (also resets presentation count)
             self.storage.update_card_after_review(
                 card.stored.id,
                 new_memory.stability,
@@ -593,50 +503,75 @@ impl App {
                 due_date,
             )?;
 
-            // Record the review
             self.storage.record_review(
                 card.stored.id,
                 rating.as_u32() as i32,
                 response_time_ms as i64,
-                self.attempts as i32,
+                study.attempts as i32,
             )?;
 
-            // Update stats
-            self.stats.reviewed += 1;
-            self.stats.correct += 1;
+            study.stats.reviewed += 1;
+            study.stats.correct += 1;
         }
 
         Ok(())
     }
 
-    /// Move to the next card
-    fn next_card(&mut self) -> Result<()> {
-        // If first attempt failed, increment presentation count and push card to back of queue
-        if self.first_attempt_failed
-            && let Some(card) = self.current_cards.get(self.current_card_idx)
+    fn next_card(&mut self, mut study: StudyState) -> Result<()> {
+        if study.first_attempt_failed
+            && let Some(card) = study.cards.get(study.card_idx)
         {
             self.storage.increment_presentation_count(card.stored.id)?;
 
             let mut updated_stored = card.stored.clone();
             updated_stored.current_presentation_count += 1;
-            self.current_cards.push(StudyCard {
+            study.cards.push(StudyCard {
                 stored: updated_stored,
                 keybind: card.keybind.clone(),
             });
         }
 
-        self.current_card_idx += 1;
+        study.card_idx += 1;
 
-        if self.current_card_idx >= self.current_cards.len() {
-            // Done with all cards
-            self.stats.end_time = Some(Instant::now());
+        if study.card_idx >= study.cards.len() {
+            study.stats.end_time = Some(Instant::now());
             self.pop_keyboard_mode();
-            self.phase = Phase::Summary;
+            self.state = AppState::Summary(SummaryState { stats: study.stats });
         } else {
-            self.phase = Phase::Studying;
-            self.setup_current_card();
+            Self::setup_current_card(&mut study);
+            self.state = AppState::Studying(study);
         }
 
         Ok(())
+    }
+
+    fn pause(&mut self) {
+        let prev = std::mem::take(&mut self.state);
+        self.state = AppState::Paused(PausedState {
+            previous: Box::new(prev),
+            started_at: Instant::now(),
+        });
+    }
+
+    fn resume(&mut self) {
+        let AppState::Paused(paused) = std::mem::take(&mut self.state) else {
+            return;
+        };
+        let mut prev = *paused.previous;
+        let delta = paused.started_at.elapsed();
+        if let AppState::Studying(ref mut s) = prev {
+            s.card_start_time += delta;
+        }
+        self.state = prev;
+    }
+
+    fn check_timeout(study: &mut StudyState, timeout_secs: u64) {
+        let elapsed = study.card_start_time.elapsed();
+        let timeout = Duration::from_secs(timeout_secs);
+
+        if elapsed >= timeout && study.attempts == 0 {
+            study.attempts = 1;
+            study.first_attempt_failed = true;
+        }
     }
 }

@@ -38,25 +38,9 @@ Added `conn.pragma_update(None, "foreign_keys", "ON")?;` in `Storage::open` befo
 
 ---
 
-## #7 — App is a god-struct with 18+ fields
+## #7 — ~~App is a god-struct with 18+ fields~~ RESOLVED
 
-**File:** `src/app.rs:40-68`
-
-`App` mixes config, storage, scheduling, UI state, timers, keyboard mode, and pause state into a single flat struct. Many fields are only relevant in certain phases (e.g., `matcher` is `None` outside studying, `pause_start` is `None` outside pause).
-
-**Fix:** Extract phase-specific data into sub-structs and/or use a state enum that carries its own data:
-
-```rust
-enum AppState {
-    DeckSelection { decks: Vec<DeckStats>, selected: usize },
-    Studying(StudyState),
-    ShowingAnswer(StudyState),
-    Paused { snapshot: Box<AppState>, pause_start: Instant },
-    Summary(SessionStats),
-}
-```
-
-This eliminates impossible states and makes match arms self-documenting.
+Replaced flat `Phase` enum + 18 scattered fields with a discriminated `AppState` enum (`DeckSelection`, `Studying`, `ShowingSuccess`, `ShowingAnswer`, `Paused`, `Summary`) where each variant carries only its relevant state. `App` now holds only shared fields (config, storage, scheduler, keybinds). `matcher` is non-optional in `StudyState`. Pause uses `Box<AppState>` snapshot with `std::mem::replace`.
 
 ---
 
@@ -100,14 +84,6 @@ let quit_chord = Chord::parse(&config.quit_keybind).ok();
 
 ---
 
-## #11 — Dead parameter in render_typed_chords
+## #11 — ~~Dead parameter in render_typed_chords~~ RESOLVED
 
-**File:** `src/ui.rs:92`
-
-`render_typed_chords` accepts `_showing_answer` but never uses it.
-
-```rust
-fn render_typed_chords(state: &MatchState, _showing_answer: bool) -> Line<'static> {
-```
-
-**Fix:** Remove the parameter and update the call site.
+Removed unused `_showing_answer` parameter from `render_typed_chords` and updated the call site. Fixed alongside issue #7.
