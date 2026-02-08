@@ -18,11 +18,13 @@ Built with Rust and [ratatui](https://github.com/ratatui/ratatui), using the [FS
 
 ## Installation
 
+### Cargo
+
 ```bash
 cargo install kbsr
 ```
 
-With Nix flakes:
+### Nix
 
 ```bash
 nix run github:dbalmain/kbsr
@@ -30,7 +32,7 @@ nix run github:dbalmain/kbsr
 nix profile install github:dbalmain/kbsr
 ```
 
-Or build from source:
+### From source
 
 ```bash
 git clone https://github.com/dbalmain/kbsr.git
