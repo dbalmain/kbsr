@@ -22,6 +22,14 @@ Built with Rust and [ratatui](https://github.com/ratatui/ratatui), using the [FS
 cargo install kbsr
 ```
 
+With Nix flakes:
+
+```bash
+nix run github:dbalmain/kbsr
+# or install persistently
+nix profile install github:dbalmain/kbsr
+```
+
 Or build from source:
 
 ```bash
