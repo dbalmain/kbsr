@@ -1,8 +1,12 @@
-![kbsr](./assets/kbsr-logo.png)
-
-**Keybind Spaced Repetition** - Learn keyboard shortcuts by actually typing them, with spaced repetition scheduling.
-
-[![demo](./assets/demo/kbsr-demo.svg)](https://asciinema.org/a/gXePg3GCR1SEEjgo)
+<p align="center">
+  <img src="./assets/kbsr-logo.png" alt="kbsr" width="200">
+  <br>
+  <strong>Keybind Spaced Repetition</strong> - Learn keyboard shortcuts by actually typing them, with spaced repetition scheduling.
+  <br><br>
+  <a href="https://asciinema.org/a/gXePg3GCR1SEEjgo">
+    <img src="./assets/demo/kbsr-demo.svg" alt="demo">
+  </a>
+</p>
 
 Built with Rust and [ratatui](https://github.com/ratatui/ratatui), using the [FSRS](https://github.com/open-spaced-repetition/fsrs-rs) algorithm for optimal review scheduling.
 
