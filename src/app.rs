@@ -3,9 +3,9 @@ use crate::deck::{Deck, KeyboardMode, list_decks};
 use crate::keybind::{Chord, Keybind};
 use crate::matcher::{MatchState, Matcher};
 use crate::scheduler::{Rating, Scheduler};
-use crate::storage::{DeckStats, Storage, StoredCard};
+use crate::storage::{DeckStats, DeckSyncInput, Storage, StoredCard};
 use crate::ui;
-use anyhow::Result;
+use anyhow::{Context, Result};
 use crossterm::event::{
     self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, KeyboardEnhancementFlags,
     PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
@@ -13,7 +13,7 @@ use crossterm::event::{
 use crossterm::execute;
 use rand::seq::SliceRandom;
 use ratatui::{DefaultTerminal, Frame};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::io::stdout;
 use std::time::{Duration, Instant};
 
@@ -73,6 +73,7 @@ pub struct App {
     quit_chord: Option<Chord>,
     should_exit: bool,
     current_keyboard_mode: Option<KeyboardMode>,
+    keyboard_modes: HashMap<String, KeyboardMode>,
     selected_deck_idx: usize,
     show_hints: bool,
     state: AppState,
@@ -84,8 +85,17 @@ impl App {
         let storage = Storage::open(&config.db_path)?;
         let scheduler = Scheduler::new(config.desired_retention)?;
 
-        let pause_chord = Chord::parse(&config.pause_keybind).ok();
-        let quit_chord = Chord::parse(&config.quit_keybind).ok();
+        let pause_chord = Some(Chord::parse(&config.pause_keybind).with_context(|| {
+            format!(
+                "Invalid pause_keybind '{}' in config",
+                config.pause_keybind
+            )
+        })?);
+        let quit_chord = Some(
+            Chord::parse(&config.quit_keybind).with_context(|| {
+                format!("Invalid quit_keybind '{}' in config", config.quit_keybind)
+            })?,
+        );
 
         let show_hints = storage
             .get_setting("show_hints")
@@ -102,6 +112,7 @@ impl App {
             quit_chord,
             should_exit: false,
             current_keyboard_mode: None,
+            keyboard_modes: HashMap::new(),
             selected_deck_idx: 0,
             show_hints,
             state: AppState::DeckSelection(DeckSelectionState {
@@ -111,7 +122,7 @@ impl App {
     }
 
     pub fn run(mut self, terminal: &mut DefaultTerminal) -> Result<()> {
-        self.load_deck_info()?;
+        self.sync_deck_info()?;
 
         while !self.should_exit {
             terminal.draw(|frame| self.render(frame))?;
@@ -121,41 +132,41 @@ impl App {
         Ok(())
     }
 
-    fn load_deck_info(&mut self) -> Result<()> {
-        use crate::deck::KeyboardMode;
-        use std::collections::HashMap;
-
+    fn sync_deck_info(&mut self) -> Result<()> {
         Storage::create_daily_backup(&self.config.db_path)?;
 
         let deck_files = list_decks(&self.config.decks_dir)?;
         let mut active_decks = HashSet::new();
-        let mut keyboard_modes: HashMap<String, KeyboardMode> = HashMap::new();
+        let mut sync_inputs = Vec::new();
 
         for path in deck_files {
             let deck = Deck::load(&path)?;
             active_decks.insert(deck.name.clone());
-            keyboard_modes.insert(deck.name.clone(), deck.keyboard_mode);
+            self.keyboard_modes
+                .insert(deck.name.clone(), deck.keyboard_mode);
 
-            let mut deck_keybinds = HashSet::new();
+            let keybinds = deck
+                .cards
+                .iter()
+                .map(|card| (card.keybind.to_string(), card.description.clone()))
+                .collect();
 
-            for card in &deck.cards {
-                let keybind_str = card.keybind.to_string();
-                deck_keybinds.insert(keybind_str.clone());
-                self.storage
-                    .upsert_card(&deck.name, &keybind_str, &card.description)?;
-            }
-
-            self.storage
-                .delete_removed_cards(&deck.name, &deck_keybinds)?;
+            sync_inputs.push(DeckSyncInput {
+                deck_name: deck.name,
+                keybinds,
+            });
         }
 
-        self.storage.delete_orphaned_decks(&active_decks)?;
+        self.storage.sync_decks(sync_inputs, &active_decks)?;
+        self.refresh_deck_stats()?;
 
-        let available_decks = self.storage.get_deck_stats(&keyboard_modes)?;
+        Ok(())
+    }
 
+    fn refresh_deck_stats(&mut self) -> Result<()> {
+        let available_decks = self.storage.get_deck_stats(&self.keyboard_modes)?;
         self.selected_deck_idx = self.selected_deck_idx.min(available_decks.len());
         self.state = AppState::DeckSelection(DeckSelectionState { available_decks });
-
         Ok(())
     }
 
@@ -174,8 +185,9 @@ impl App {
             }
         };
 
-        let _ = execute!(stdout(), PushKeyboardEnhancementFlags(flags));
-        self.current_keyboard_mode = Some(mode);
+        if execute!(stdout(), PushKeyboardEnhancementFlags(flags)).is_ok() {
+            self.current_keyboard_mode = Some(mode);
+        }
     }
 
     fn pop_keyboard_mode(&mut self) {
@@ -300,7 +312,7 @@ impl App {
                         self.should_exit = true;
                     } else {
                         self.pop_keyboard_mode();
-                        self.load_deck_info()?;
+                        self.refresh_deck_stats()?;
                     }
                     return Ok(());
                 }
@@ -424,7 +436,7 @@ impl App {
     }
 
     fn handle_summary_key(&mut self, _key: KeyEvent) -> Result<()> {
-        self.load_deck_info()?;
+        self.refresh_deck_stats()?;
         Ok(())
     }
 

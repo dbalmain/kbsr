@@ -82,6 +82,12 @@ pub struct Storage {
     conn: Connection,
 }
 
+pub struct DeckSyncInput {
+    pub deck_name: String,
+    pub keybinds: Vec<(String, String)>,
+}
+
+
 impl Storage {
     /// Open or create the database
     pub fn open(path: &Path) -> Result<Self> {
@@ -138,30 +144,68 @@ impl Storage {
         Ok(())
     }
 
-    /// Upsert a card (insert or update if exists)
-    /// Resets progress if description changes
-    pub fn upsert_card(&self, deck: &str, keybind: &str, description: &str) -> Result<i64> {
-        self.conn.execute(
-            "INSERT INTO cards (deck, keybind, description)
-             VALUES (?1, ?2, ?3)
-             ON CONFLICT(deck, keybind) DO UPDATE SET
-                description = ?3,
-                stability = CASE WHEN description != ?3 THEN NULL ELSE stability END,
-                difficulty = CASE WHEN description != ?3 THEN NULL ELSE difficulty END,
-                due_date = CASE WHEN description != ?3 THEN NULL ELSE due_date END,
-                last_review = CASE WHEN description != ?3 THEN NULL ELSE last_review END,
-                review_count = CASE WHEN description != ?3 THEN 0 ELSE review_count END,
-                current_presentation_count = CASE WHEN description != ?3 THEN 0 ELSE current_presentation_count END",
-            params![deck, keybind, description],
-        )?;
+    /// Sync all decks in a single transaction: upsert cards, delete removed cards, delete orphaned decks.
+    pub fn sync_decks(
+        &mut self,
+        decks: Vec<DeckSyncInput>,
+        active_deck_names: &HashSet<String>,
+    ) -> Result<()> {
+        let tx = self.conn.transaction()?;
 
-        let id = self.conn.query_row(
-            "SELECT id FROM cards WHERE deck = ?1 AND keybind = ?2",
-            params![deck, keybind],
-            |row| row.get(0),
-        )?;
+        for deck in &decks {
+            let mut deck_keybinds = HashSet::new();
 
-        Ok(id)
+            for (keybind, description) in &deck.keybinds {
+                deck_keybinds.insert(keybind.clone());
+                tx.execute(
+                    "INSERT INTO cards (deck, keybind, description)
+                     VALUES (?1, ?2, ?3)
+                     ON CONFLICT(deck, keybind) DO UPDATE SET
+                        description = ?3,
+                        stability = CASE WHEN description != ?3 THEN NULL ELSE stability END,
+                        difficulty = CASE WHEN description != ?3 THEN NULL ELSE difficulty END,
+                        due_date = CASE WHEN description != ?3 THEN NULL ELSE due_date END,
+                        last_review = CASE WHEN description != ?3 THEN NULL ELSE last_review END,
+                        review_count = CASE WHEN description != ?3 THEN 0 ELSE review_count END,
+                        current_presentation_count = CASE WHEN description != ?3 THEN 0 ELSE current_presentation_count END",
+                    params![deck.deck_name, keybind, description],
+                )?;
+            }
+
+            let mut stmt = tx.prepare("SELECT keybind FROM cards WHERE deck = ?1")?;
+            let existing: HashSet<String> = stmt
+                .query_map(params![deck.deck_name], |row| row.get(0))?
+                .collect::<Result<HashSet<_>, _>>()?;
+            drop(stmt);
+
+            for keybind in existing.difference(&deck_keybinds) {
+                tx.execute(
+                    "DELETE FROM reviews WHERE card_id IN (SELECT id FROM cards WHERE deck = ?1 AND keybind = ?2)",
+                    params![deck.deck_name, keybind],
+                )?;
+                tx.execute(
+                    "DELETE FROM cards WHERE deck = ?1 AND keybind = ?2",
+                    params![deck.deck_name, keybind],
+                )?;
+            }
+        }
+
+        let mut stmt = tx.prepare("SELECT DISTINCT deck FROM cards")?;
+        let db_decks: HashSet<String> = stmt
+            .query_map([], |row| row.get(0))?
+            .collect::<Result<HashSet<_>, _>>()?;
+        drop(stmt);
+
+        for deck in db_decks.difference(active_deck_names) {
+            tx.execute(
+                "DELETE FROM reviews WHERE card_id IN (SELECT id FROM cards WHERE deck = ?1)",
+                params![deck],
+            )?;
+            tx.execute("DELETE FROM cards WHERE deck = ?1", params![deck])?;
+        }
+
+        tx.commit()?;
+        Ok(())
     }
 
     /// Get due cards for a deck (due by end of today in local timezone, or never reviewed)
@@ -295,70 +339,6 @@ impl Storage {
             .collect::<Result<Vec<_>, _>>()?;
 
         Ok(reviews)
-    }
-
-    /// Get all keybinds for a deck
-    pub fn get_deck_keybinds(&self, deck: &str) -> Result<HashSet<String>> {
-        let mut stmt = self
-            .conn
-            .prepare("SELECT keybind FROM cards WHERE deck = ?1")?;
-
-        let keybinds = stmt
-            .query_map(params![deck], |row| row.get(0))?
-            .collect::<Result<HashSet<String>, _>>()?;
-
-        Ok(keybinds)
-    }
-
-    /// Delete cards from a deck that are not in the given set of keybinds.
-    /// Returns the number of cards deleted.
-    pub fn delete_removed_cards(
-        &self,
-        deck: &str,
-        keep_keybinds: &HashSet<String>,
-    ) -> Result<usize> {
-        let existing = self.get_deck_keybinds(deck)?;
-        let to_delete: Vec<_> = existing.difference(keep_keybinds).collect();
-
-        if to_delete.is_empty() {
-            return Ok(0);
-        }
-
-        let mut deleted = 0;
-        for keybind in &to_delete {
-            self.conn.execute(
-                "DELETE FROM reviews WHERE card_id IN (SELECT id FROM cards WHERE deck = ?1 AND keybind = ?2)",
-                params![deck, keybind],
-            )?;
-            deleted += self.conn.execute(
-                "DELETE FROM cards WHERE deck = ?1 AND keybind = ?2",
-                params![deck, keybind],
-            )?;
-        }
-
-        Ok(deleted)
-    }
-
-    /// Delete decks that are no longer present in the filesystem.
-    /// Returns the names of deleted decks.
-    pub fn delete_orphaned_decks(&self, active_decks: &HashSet<String>) -> Result<Vec<String>> {
-        let mut stmt = self.conn.prepare("SELECT DISTINCT deck FROM cards")?;
-        let db_decks: HashSet<String> = stmt
-            .query_map([], |row| row.get(0))?
-            .collect::<Result<HashSet<_>, _>>()?;
-
-        let orphaned: Vec<String> = db_decks.difference(active_decks).cloned().collect();
-
-        for deck in &orphaned {
-            self.conn.execute(
-                "DELETE FROM reviews WHERE card_id IN (SELECT id FROM cards WHERE deck = ?1)",
-                params![deck],
-            )?;
-            self.conn
-                .execute("DELETE FROM cards WHERE deck = ?1", params![deck])?;
-        }
-
-        Ok(orphaned)
     }
 
     /// Get a setting value by key

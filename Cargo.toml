@@ -1,6 +1,6 @@
 [package]
 name = "kbsr"
-version = "0.1.3"
+version = "0.1.5"
 edition = "2024"
 description = "Learn keyboard shortcuts through spaced repetition in the terminal"
 license = "MIT"
