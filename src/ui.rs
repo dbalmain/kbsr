@@ -2,11 +2,22 @@ use crate::matcher::MatchState;
 use crate::storage::DeckStats;
 use ratatui::{
     Frame,
-    layout::{Alignment, Constraint, Layout},
-    style::{Color, Style},
+    layout::{Alignment, Constraint, Layout, Rect},
+    style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::Paragraph,
 };
+
+const DECK_SELECTION_HINTS: &[(&[&str], &str)] = &[
+    (&["↑", "↓"], "move"),
+    (&["Enter"], "study"),
+    (&["q", "Esc"], "quit"),
+    (&["?"], "toggle hints"),
+];
+
+const STUDY_HINTS: &[(&[&str], &str)] = &[(&["Esc"], "reveal")];
+
+const SUMMARY_HINTS: &[(&[&str], &str)] = &[(&["q"], "quit"), (&["any key"], "continue")];
 
 /// UI state for rendering
 pub struct UiState<'a> {
@@ -24,13 +35,18 @@ pub struct UiState<'a> {
     pub message: Option<&'a str>,
     /// Whether to show the success checkmark
     pub show_success_checkmark: bool,
+    /// Whether to show key hints
+    pub show_hints: bool,
+    /// Configured pause keybind string
+    pub pause_keybind: &'a str,
+    /// Configured quit keybind string
+    pub quit_keybind: &'a str,
 }
 
 /// Render the minimal UI
 pub fn render(frame: &mut Frame, state: &UiState) {
     let area = frame.area();
 
-    // Calculate layout - centered sections
     let chunks = Layout::vertical([
         Constraint::Fill(1),   // Top spacer
         Constraint::Length(1), // Deck name
@@ -86,6 +102,10 @@ pub fn render(frame: &mut Frame, state: &UiState) {
         .alignment(Alignment::Center);
         frame.render_widget(checkmark, chunks[5]);
     }
+
+    if state.show_hints {
+        render_study_hints(frame, area, state.pause_keybind, state.quit_keybind);
+    }
 }
 
 /// Render the typed chords with appropriate coloring
@@ -116,7 +136,12 @@ fn render_typed_chords(state: &MatchState) -> Line<'static> {
 }
 
 /// Render deck selection screen
-pub fn render_deck_selection(frame: &mut Frame, decks: &[DeckStats], selected: usize) {
+pub fn render_deck_selection(
+    frame: &mut Frame,
+    decks: &[DeckStats],
+    selected: usize,
+    show_hints: bool,
+) {
     let area = frame.area();
 
     let chunks = Layout::vertical([
@@ -169,6 +194,10 @@ pub fn render_deck_selection(frame: &mut Frame, decks: &[DeckStats], selected: u
 
     let list = Paragraph::new(lines).alignment(Alignment::Center);
     frame.render_widget(list, chunks[2]);
+
+    if show_hints {
+        render_hints_bar(frame, area, DECK_SELECTION_HINTS);
+    }
 }
 
 /// Render paused screen
@@ -196,12 +225,18 @@ pub fn render_paused(frame: &mut Frame, resume_keybind: &str) {
 }
 
 /// Render session summary
-pub fn render_summary(frame: &mut Frame, reviewed: usize, correct: usize, total_time_secs: u64) {
+pub fn render_summary(
+    frame: &mut Frame,
+    reviewed: usize,
+    correct: usize,
+    total_time_secs: u64,
+    show_hints: bool,
+) {
     let area = frame.area();
 
     let chunks = Layout::vertical([
         Constraint::Fill(1),
-        Constraint::Length(6),
+        Constraint::Length(5),
         Constraint::Fill(1),
     ])
     .split(area);
@@ -221,13 +256,84 @@ pub fn render_summary(frame: &mut Frame, reviewed: usize, correct: usize, total_
         Line::from(format!("Cards reviewed: {}", reviewed)),
         Line::from(format!("Correct: {} ({:.0}%)", correct, accuracy)),
         Line::from(format!("Time: {}s", total_time_secs)),
-        Line::from(""),
-        Line::from(Span::styled(
-            "Press q to quit or any other key to return to the decks",
-            Style::default().fg(Color::DarkGray),
-        )),
     ];
 
     let summary = Paragraph::new(lines).alignment(Alignment::Center);
     frame.render_widget(summary, chunks[1]);
+
+    if show_hints {
+        render_hints_bar(frame, area, SUMMARY_HINTS);
+    }
+}
+
+fn render_study_hints(frame: &mut Frame, area: Rect, pause_keybind: &str, quit_keybind: &str) {
+    let bar_area = Rect {
+        x: area.x,
+        y: area.y + area.height.saturating_sub(2),
+        width: area.width,
+        height: 1,
+    };
+
+    let key_style = Style::default().fg(Color::Cyan);
+    let desc_style = Style::default().fg(Color::DarkGray);
+
+    let mut spans = Vec::new();
+
+    for (keys, description) in STUDY_HINTS {
+        for key in *keys {
+            spans.push(Span::styled(*key, key_style));
+        }
+        spans.push(Span::raw(" "));
+        spans.push(Span::styled(*description, desc_style));
+        spans.push(Span::raw("  "));
+    }
+
+    if !pause_keybind.is_empty() {
+        spans.push(Span::styled(pause_keybind, key_style));
+        spans.push(Span::raw(" "));
+        spans.push(Span::styled("pause", desc_style));
+        spans.push(Span::raw("  "));
+    }
+    if !quit_keybind.is_empty() {
+        spans.push(Span::styled(quit_keybind, key_style));
+        spans.push(Span::raw(" "));
+        spans.push(Span::styled("quit", desc_style));
+        spans.push(Span::raw("  "));
+    }
+
+    let paragraph = Paragraph::new(Line::from(spans)).alignment(Alignment::Center);
+    frame.render_widget(paragraph, bar_area);
+}
+
+fn render_hints_bar(frame: &mut Frame, area: Rect, hints: &[(&[&str], &str)]) {
+    if hints.is_empty() {
+        return;
+    }
+
+    let bar_area = Rect {
+        x: area.x,
+        y: area.y + area.height.saturating_sub(2),
+        width: area.width,
+        height: 1,
+    };
+
+    let key_style = Style::default().fg(Color::Cyan);
+    let desc_style = Style::default().fg(Color::DarkGray);
+    let sep_style = desc_style.add_modifier(Modifier::DIM);
+
+    let mut spans = Vec::new();
+    for (keys, description) in hints {
+        for (i, key) in keys.iter().enumerate() {
+            if i > 0 {
+                spans.push(Span::styled("/", sep_style));
+            }
+            spans.push(Span::styled(*key, key_style));
+        }
+        spans.push(Span::raw(" "));
+        spans.push(Span::styled(*description, desc_style));
+        spans.push(Span::raw("  "));
+    }
+
+    let paragraph = Paragraph::new(Line::from(spans)).alignment(Alignment::Center);
+    frame.render_widget(paragraph, bar_area);
 }

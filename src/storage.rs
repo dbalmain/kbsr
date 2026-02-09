@@ -127,6 +127,11 @@ impl Storage {
             CREATE INDEX IF NOT EXISTS idx_cards_deck ON cards(deck);
             CREATE INDEX IF NOT EXISTS idx_cards_due ON cards(due_date);
             CREATE INDEX IF NOT EXISTS idx_reviews_card ON reviews(card_id);
+
+            CREATE TABLE IF NOT EXISTS settings (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            );
             ",
         )?;
 
@@ -354,6 +359,30 @@ impl Storage {
         }
 
         Ok(orphaned)
+    }
+
+    /// Get a setting value by key
+    pub fn get_setting(&self, key: &str) -> Result<Option<String>> {
+        let result = self.conn.query_row(
+            "SELECT value FROM settings WHERE key = ?1",
+            params![key],
+            |row| row.get(0),
+        );
+        match result {
+            Ok(value) => Ok(Some(value)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    /// Set a setting value
+    pub fn set_setting(&self, key: &str, value: &str) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO settings (key, value) VALUES (?1, ?2)
+             ON CONFLICT(key) DO UPDATE SET value = ?2",
+            params![key, value],
+        )?;
+        Ok(())
     }
 
     /// Create a daily backup of the database if one doesn't exist for today.

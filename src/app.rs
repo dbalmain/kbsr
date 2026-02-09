@@ -7,7 +7,7 @@ use crate::storage::{DeckStats, Storage, StoredCard};
 use crate::ui;
 use anyhow::Result;
 use crossterm::event::{
-    self, Event, KeyCode, KeyEvent, KeyEventKind, KeyboardEnhancementFlags,
+    self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, KeyboardEnhancementFlags,
     PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
 };
 use crossterm::execute;
@@ -74,6 +74,7 @@ pub struct App {
     should_exit: bool,
     current_keyboard_mode: Option<KeyboardMode>,
     selected_deck_idx: usize,
+    show_hints: bool,
     state: AppState,
 }
 
@@ -86,6 +87,13 @@ impl App {
         let pause_chord = Chord::parse(&config.pause_keybind).ok();
         let quit_chord = Chord::parse(&config.quit_keybind).ok();
 
+        let show_hints = storage
+            .get_setting("show_hints")
+            .ok()
+            .flatten()
+            .map(|v| v != "false")
+            .unwrap_or(true);
+
         Ok(Self {
             config,
             storage,
@@ -95,6 +103,7 @@ impl App {
             should_exit: false,
             current_keyboard_mode: None,
             selected_deck_idx: 0,
+            show_hints,
             state: AppState::DeckSelection(DeckSelectionState {
                 available_decks: Vec::new(),
             }),
@@ -180,7 +189,12 @@ impl App {
         match &self.state {
             AppState::Idle => unreachable!(),
             AppState::DeckSelection(s) => {
-                ui::render_deck_selection(frame, &s.available_decks, self.selected_deck_idx);
+                ui::render_deck_selection(
+                    frame,
+                    &s.available_decks,
+                    self.selected_deck_idx,
+                    self.show_hints,
+                );
             }
             AppState::Studying(s) => {
                 if let Some(card) = s.cards.get(s.card_idx) {
@@ -197,6 +211,16 @@ impl App {
                     };
 
                     let answer_str = card.keybind.to_string();
+                    let pause_str = self
+                        .pause_chord
+                        .as_ref()
+                        .map(|c| c.to_string())
+                        .unwrap_or_default();
+                    let quit_str = self
+                        .quit_chord
+                        .as_ref()
+                        .map(|c| c.to_string())
+                        .unwrap_or_default();
                     let ui_state = ui::UiState {
                         deck: &card.stored.deck,
                         clue: &card.stored.description,
@@ -205,6 +229,9 @@ impl App {
                         answer: &answer_str,
                         message,
                         show_success_checkmark: s.success_display_until.is_some(),
+                        show_hints: self.show_hints,
+                        pause_keybind: &pause_str,
+                        quit_keybind: &quit_str,
                     };
                     ui::render(frame, &ui_state);
                 }
@@ -223,7 +250,13 @@ impl App {
                     .end_time
                     .map(|end| end.duration_since(s.stats.start_time))
                     .unwrap_or_else(|| s.stats.start_time.elapsed());
-                ui::render_summary(frame, s.stats.reviewed, s.stats.correct, elapsed.as_secs());
+                ui::render_summary(
+                    frame,
+                    s.stats.reviewed,
+                    s.stats.correct,
+                    elapsed.as_secs(),
+                    self.show_hints,
+                );
             }
         }
     }
@@ -319,6 +352,12 @@ impl App {
             }
             KeyCode::Esc | KeyCode::Char('q') => {
                 self.should_exit = true;
+            }
+            KeyCode::Char('/') if key.modifiers.contains(KeyModifiers::SHIFT) => {
+                self.show_hints = !self.show_hints;
+                let _ = self
+                    .storage
+                    .set_setting("show_hints", if self.show_hints { "true" } else { "false" });
             }
             _ => {}
         }
