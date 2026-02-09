@@ -17,7 +17,7 @@ const DECK_SELECTION_HINTS: &[(&[&str], &str)] = &[
 
 const STUDY_HINTS: &[(&[&str], &str)] = &[(&["Esc"], "reveal")];
 
-const SUMMARY_HINTS: &[(&[&str], &str)] = &[(&["q"], "quit"), (&["any key"], "continue")];
+const SUMMARY_HINTS: &[(&[&str], &str)] = &[(&["any key"], "continue")];
 
 /// UI state for rendering
 pub struct UiState<'a> {

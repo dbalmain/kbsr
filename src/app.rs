@@ -296,7 +296,12 @@ impl App {
                 if let Some(ref quit_chord) = self.quit_chord
                     && quit_chord.matches(&key)
                 {
-                    self.should_exit = true;
+                    if matches!(self.state, AppState::DeckSelection(_)) {
+                        self.should_exit = true;
+                    } else {
+                        self.pop_keyboard_mode();
+                        self.load_deck_info()?;
+                    }
                     return Ok(());
                 }
 
@@ -418,12 +423,8 @@ impl App {
         Ok(())
     }
 
-    fn handle_summary_key(&mut self, key: KeyEvent) -> Result<()> {
-        if key.code == KeyCode::Char('q') {
-            self.should_exit = true;
-        } else {
-            self.load_deck_info()?;
-        }
+    fn handle_summary_key(&mut self, _key: KeyEvent) -> Result<()> {
+        self.load_deck_info()?;
         Ok(())
     }
 
