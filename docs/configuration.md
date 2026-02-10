@@ -31,6 +31,15 @@ shuffle_cards = true
 # Lower = fewer reviews, more forgetting
 desired_retention = 0.9
 
+# Interval multiplier applied to FSRS intervals (default: 0.12)
+# Lower = more frequent reviews. At 0.12, "Easy" on a new card ≈ 1 day.
+# Set to 1.0 for standard FSRS intervals (like Anki).
+interval_modifier = 0.12
+
+# Maximum interval in days between reviews (default: 30)
+# Cards will never be scheduled further out than this.
+max_interval_days = 30.0
+
 # Custom paths (optional, defaults to XDG directories)
 # decks_dir = "/path/to/decks"
 # db_path = "/path/to/kbsr.db"
@@ -48,5 +57,7 @@ desired_retention = 0.9
 | `quit_keybind` | `Super+Ctrl+Q` | Chord to quit from any screen |
 | `shuffle_cards` | `true` | Randomize card order each session |
 | `desired_retention` | `0.9` | Target recall probability for FSRS scheduling |
+| `interval_modifier` | `0.12` | Multiplier for FSRS intervals (lower = more frequent reviews) |
+| `max_interval_days` | `30.0` | Maximum days between reviews |
 | `decks_dir` | `~/.config/kbsr/decks` | Where deck TSV files are stored |
 | `db_path` | `~/.local/share/kbsr/kbsr.db` | SQLite database location |

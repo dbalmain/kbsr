@@ -60,14 +60,22 @@ impl Rating {
 pub struct Scheduler {
     fsrs: FSRS,
     desired_retention: f32,
+    interval_modifier: f32,
+    max_interval_days: f32,
 }
 
 impl Scheduler {
     /// Create a new scheduler with desired retention rate (0.0 - 1.0)
-    pub fn new(desired_retention: f32) -> Result<Self> {
+    pub fn new(
+        desired_retention: f32,
+        interval_modifier: f32,
+        max_interval_days: f32,
+    ) -> Result<Self> {
         Ok(Self {
             fsrs: FSRS::new(Some(&DEFAULT_PARAMETERS))?,
             desired_retention,
+            interval_modifier,
+            max_interval_days,
         })
     }
 
@@ -110,9 +118,10 @@ impl Scheduler {
             Rating::Easy => &next_states.easy,
         };
 
-        // Calculate due date from interval (in days)
-        let interval_days = item_state.interval.max(1.0) as i64;
-        let due_date = Utc::now() + Duration::days(interval_days);
+        // Calculate due date from interval, applying modifier and cap
+        let interval_days =
+            (item_state.interval * self.interval_modifier).min(self.max_interval_days);
+        let due_date = Utc::now() + Duration::seconds((interval_days * 86400.0) as i64);
 
         Ok((item_state.memory, due_date))
     }
@@ -188,7 +197,7 @@ mod tests {
 
     #[test]
     fn test_schedule_new_card() {
-        let scheduler = Scheduler::new(0.9).unwrap();
+        let scheduler = Scheduler::new(0.9, 0.12, 30.0).unwrap();
         let (memory, due) = scheduler.schedule(None, None, Rating::Good).unwrap();
 
         assert!(memory.stability > 0.0);

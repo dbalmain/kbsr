@@ -36,6 +36,15 @@ pub struct Config {
     #[serde(default = "default_desired_retention")]
     pub desired_retention: f32,
 
+    /// Interval multiplier to compress/expand FSRS intervals (default: 0.12)
+    /// Lower values = more frequent reviews. 0.12 makes "Easy" on a new card ≈ 1 day.
+    #[serde(default = "default_interval_modifier")]
+    pub interval_modifier: f32,
+
+    /// Maximum interval in days between reviews (default: 30)
+    #[serde(default = "default_max_interval_days")]
+    pub max_interval_days: f32,
+
     /// Path to decks directory
     #[serde(default = "default_decks_dir")]
     pub decks_dir: PathBuf,
@@ -77,6 +86,14 @@ fn default_desired_retention() -> f32 {
     0.9
 }
 
+fn default_interval_modifier() -> f32 {
+    0.12
+}
+
+fn default_max_interval_days() -> f32 {
+    30.0
+}
+
 fn default_decks_dir() -> PathBuf {
     dirs::config_dir()
         .map(|p| p.join("kbsr").join("decks"))
@@ -100,6 +117,8 @@ impl Default for Config {
             quit_keybind: default_quit_keybind(),
             shuffle_cards: default_shuffle_cards(),
             desired_retention: default_desired_retention(),
+            interval_modifier: default_interval_modifier(),
+            max_interval_days: default_max_interval_days(),
             decks_dir: default_decks_dir(),
             db_path: default_db_path(),
         }

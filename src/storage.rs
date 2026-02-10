@@ -87,7 +87,6 @@ pub struct DeckSyncInput {
     pub keybinds: Vec<(String, String)>,
 }
 
-
 impl Storage {
     /// Open or create the database
     pub fn open(path: &Path) -> Result<Self> {

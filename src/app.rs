@@ -83,19 +83,18 @@ impl App {
     pub fn new(config: Config) -> Result<Self> {
         config.ensure_dirs()?;
         let storage = Storage::open(&config.db_path)?;
-        let scheduler = Scheduler::new(config.desired_retention)?;
+        let scheduler = Scheduler::new(
+            config.desired_retention,
+            config.interval_modifier,
+            config.max_interval_days,
+        )?;
 
         let pause_chord = Some(Chord::parse(&config.pause_keybind).with_context(|| {
-            format!(
-                "Invalid pause_keybind '{}' in config",
-                config.pause_keybind
-            )
+            format!("Invalid pause_keybind '{}' in config", config.pause_keybind)
         })?);
-        let quit_chord = Some(
-            Chord::parse(&config.quit_keybind).with_context(|| {
-                format!("Invalid quit_keybind '{}' in config", config.quit_keybind)
-            })?,
-        );
+        let quit_chord = Some(Chord::parse(&config.quit_keybind).with_context(|| {
+            format!("Invalid quit_keybind '{}' in config", config.quit_keybind)
+        })?);
 
         let show_hints = storage
             .get_setting("show_hints")

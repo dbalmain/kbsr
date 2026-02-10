@@ -53,6 +53,19 @@ The FSRS rating is determined by:
 
 **Cards you miss** are pushed to the end of the current session queue with an incremented presentation count. This gives you another chance to practice, but repeated presentations reduce the rating even when you eventually get it right.
 
+### Default Intervals (New Card)
+
+With the default `interval_modifier` of 0.12, intervals are compressed for muscle memory:
+
+| Rating | Next Review |
+|--------|-------------|
+| **Easy** | ~1 day |
+| **Good** | ~6.6 hours |
+| **Hard** | ~3.7 hours |
+| **Again** | ~36 minutes |
+
+Intervals grow with each successful review. Adjust `interval_modifier` in your config to change the pace (see [Configuration](configuration.md)).
+
 ## Tips
 
 ### Avoiding keybind capture
