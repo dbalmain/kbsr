@@ -39,8 +39,8 @@ struct StudyState {
     matcher: Matcher,
     card_start_time: Instant,
     attempts: u8,
-    first_attempt_failed: bool,
-    answer_revealed: bool,
+    scored_card_ids: HashSet<i64>,
+    requeue_for_practice: bool,
     failed_display_until: Option<Instant>,
     success_display_until: Option<Instant>,
     stats: SessionStats,
@@ -211,12 +211,8 @@ impl App {
                 if let Some(card) = s.cards.get(s.card_idx) {
                     let match_state = s.matcher.state();
 
-                    let message = if s.answer_revealed {
+                    let message = if s.attempts >= self.config.max_attempts {
                         Some("Type the answer to continue")
-                    } else if s.card_start_time.elapsed()
-                        >= Duration::from_secs(self.config.timeout_secs)
-                    {
-                        Some("Time's up! Keep trying...")
                     } else {
                         None
                     };
@@ -236,7 +232,7 @@ impl App {
                         deck: &card.stored.deck,
                         clue: &card.stored.description,
                         match_state: &match_state,
-                        showing_answer: s.answer_revealed,
+                        showing_answer: s.attempts >= self.config.max_attempts,
                         answer: &answer_str,
                         message,
                         show_success_checkmark: s.success_display_until.is_some(),
@@ -339,8 +335,8 @@ impl App {
                     AppState::Summary(_) => self.handle_summary_key(key)?,
                 }
             }
-        } else if let AppState::Studying(ref mut study) = self.state {
-            Self::check_timeout(study, self.config.timeout_secs);
+        } else if matches!(self.state, AppState::Studying(_)) {
+            self.check_timeout();
         }
 
         Ok(())
@@ -390,9 +386,8 @@ impl App {
         }
 
         // Escape reveals the answer (only when not already revealed)
-        if key.code == KeyCode::Esc && !study.answer_revealed {
-            study.first_attempt_failed = true;
-            study.answer_revealed = true;
+        if key.code == KeyCode::Esc && study.attempts < self.config.max_attempts {
+            study.attempts = self.config.max_attempts;
             study.matcher = Matcher::new(study.cards[study.card_idx].keybind.clone());
             return Ok(());
         }
@@ -401,30 +396,36 @@ impl App {
 
         match result {
             MatchState::Complete(_) => {
-                if !study.answer_revealed {
-                    study.attempts += 1;
-                    if !study.first_attempt_failed {
-                        self.score_card()?;
-                    }
+                let AppState::Studying(ref mut study) = self.state else {
+                    unreachable!()
+                };
+                study.attempts += 1;
+                let response_time_ms = study.card_start_time.elapsed().as_millis() as u64;
+                let num_chords = study.cards[study.card_idx].keybind.len();
+                let easy_ms = Rating::scale_threshold(self.config.easy_threshold_ms, num_chords);
+                let hard_ms = Rating::scale_threshold(self.config.hard_threshold_ms, num_chords);
+                let rating = Rating::from_speed(
+                    response_time_ms,
+                    study.attempts,
+                    easy_ms,
+                    hard_ms,
+                    self.config.max_attempts,
+                );
+                let card_id = study.cards[study.card_idx].stored.id;
+                if !study.scored_card_ids.contains(&card_id) {
+                    self.score_card(rating)?;
                 }
                 let AppState::Studying(ref mut study) = self.state else {
                     unreachable!()
                 };
+                if rating != Rating::Easy {
+                    study.requeue_for_practice = true;
+                }
                 study.success_display_until =
                     Some(Instant::now() + Duration::from_millis(self.config.success_delay_ms));
             }
             MatchState::Failed(_) => {
-                if !study.answer_revealed {
-                    if study.attempts == 0 {
-                        study.first_attempt_failed = true;
-                    }
-                    study.attempts += 1;
-                    if study.attempts >= self.config.max_attempts {
-                        study.answer_revealed = true;
-                        study.matcher = Matcher::new(study.cards[study.card_idx].keybind.clone());
-                        return Ok(());
-                    }
-                }
+                study.attempts += 1;
                 study.failed_display_until =
                     Some(Instant::now() + Duration::from_millis(self.config.failed_flash_delay_ms));
             }
@@ -490,8 +491,8 @@ impl App {
                 matcher,
                 card_start_time: Instant::now(),
                 attempts: 0,
-                first_attempt_failed: false,
-                answer_revealed: false,
+                scored_card_ids: HashSet::new(),
+                requeue_for_practice: false,
                 failed_display_until: None,
                 success_display_until: None,
                 stats,
@@ -518,67 +519,59 @@ impl App {
             study.matcher = Matcher::new(card.keybind.clone());
             study.card_start_time = Instant::now();
             study.attempts = 0;
-            study.first_attempt_failed = false;
-            study.answer_revealed = false;
+            study.requeue_for_practice = false;
         }
     }
 
-    fn score_card(&mut self) -> Result<()> {
+    fn score_card(&mut self, rating: Rating) -> Result<()> {
         let AppState::Studying(ref mut study) = self.state else {
             return Ok(());
         };
-        if let Some(card) = study.cards.get(study.card_idx) {
-            let response_time_ms = study.card_start_time.elapsed().as_millis() as u64;
+        let Some(card) = study.cards.get(study.card_idx) else {
+            return Ok(());
+        };
+        let response_time_ms = study.card_start_time.elapsed().as_millis() as u64;
+        let attempts = study.attempts;
+        let card_id = card.stored.id;
+        let memory_state = card.stored.stability.and_then(|s| {
+            card.stored
+                .difficulty
+                .map(|d| Scheduler::memory_state_from_stored(s, d))
+        });
+        let last_review = card.stored.last_review;
 
-            let rating = Rating::from_performance(
-                response_time_ms,
-                study.attempts,
-                card.stored.current_presentation_count,
-            );
+        let (new_memory, due_date) = self.scheduler.schedule(memory_state, last_review, rating)?;
+        self.storage.update_card_after_review(
+            card_id,
+            new_memory.stability,
+            new_memory.difficulty,
+            due_date,
+        )?;
+        self.storage.record_review(
+            card_id,
+            rating.as_u32() as i32,
+            response_time_ms as i64,
+            attempts as i32,
+        )?;
 
-            let memory_state = card.stored.stability.and_then(|s| {
-                card.stored
-                    .difficulty
-                    .map(|d| Scheduler::memory_state_from_stored(s, d))
-            });
-
-            let (new_memory, due_date) =
-                self.scheduler
-                    .schedule(memory_state, card.stored.last_review, rating)?;
-
-            self.storage.update_card_after_review(
-                card.stored.id,
-                new_memory.stability,
-                new_memory.difficulty,
-                due_date,
-            )?;
-
-            self.storage.record_review(
-                card.stored.id,
-                rating.as_u32() as i32,
-                response_time_ms as i64,
-                study.attempts as i32,
-            )?;
-
-            study.stats.reviewed += 1;
-            study.stats.correct += 1;
-        }
-
+        let AppState::Studying(ref mut study) = self.state else {
+            return Ok(());
+        };
+        study.scored_card_ids.insert(card_id);
+        study.stats.reviewed += 1;
         Ok(())
     }
 
     fn next_card(&mut self, mut study: StudyState) -> Result<()> {
-        if study.first_attempt_failed
-            && let Some(card) = study.cards.get(study.card_idx)
-        {
-            self.storage.increment_presentation_count(card.stored.id)?;
-
-            let mut updated_stored = card.stored.clone();
-            updated_stored.current_presentation_count += 1;
-            study.cards.push(StudyCard {
-                stored: updated_stored,
-                keybind: card.keybind.clone(),
-            });
+        if study.requeue_for_practice {
+            if let Some(card) = study.cards.get(study.card_idx) {
+                study.cards.push(StudyCard {
+                    stored: card.stored.clone(),
+                    keybind: card.keybind.clone(),
+                });
+            }
+        } else {
+            study.stats.correct += 1;
         }
 
         study.card_idx += 1;
@@ -615,13 +608,16 @@ impl App {
         self.state = prev;
     }
 
-    fn check_timeout(study: &mut StudyState, timeout_secs: u64) {
+    fn check_timeout(&mut self) {
+        let AppState::Studying(ref mut study) = self.state else {
+            return;
+        };
         let elapsed = study.card_start_time.elapsed();
-        let timeout = Duration::from_secs(timeout_secs);
+        let timeout = Duration::from_secs(self.config.timeout_secs);
 
-        if elapsed >= timeout && study.attempts == 0 {
-            study.attempts = 1;
-            study.first_attempt_failed = true;
+        if elapsed >= timeout && study.attempts < self.config.max_attempts {
+            study.attempts = self.config.max_attempts;
+            study.matcher = Matcher::new(study.cards[study.card_idx].keybind.clone());
         }
     }
 }

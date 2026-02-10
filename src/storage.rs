@@ -18,8 +18,6 @@ pub struct StoredCard {
     pub last_review: Option<DateTime<Utc>>,
     #[allow(dead_code)] // Used in DB, will be used for stats display
     pub review_count: i32,
-    /// Number of times card was presented before getting it right first try
-    pub current_presentation_count: i32,
 }
 
 use crate::deck::KeyboardMode;
@@ -48,7 +46,6 @@ fn row_to_stored_card(row: &rusqlite::Row) -> rusqlite::Result<StoredCard> {
             .get::<_, Option<String>>(7)?
             .and_then(|s| s.parse().ok()),
         review_count: row.get(8)?,
-        current_presentation_count: row.get(9)?,
     })
 }
 
@@ -213,7 +210,7 @@ impl Storage {
 
         let mut stmt = self.conn.prepare(
             "SELECT id, deck, keybind, description, stability, difficulty,
-                    due_date, last_review, review_count, current_presentation_count
+                    due_date, last_review, review_count
              FROM cards
              WHERE deck = ?1 AND (due_date IS NULL OR due_date <= ?2)
              ORDER BY due_date ASC NULLS FIRST",
@@ -226,7 +223,7 @@ impl Storage {
         Ok(cards)
     }
 
-    /// Update card after review (resets presentation count since they got it right)
+    /// Update card after review
     pub fn update_card_after_review(
         &self,
         id: i64,
@@ -243,21 +240,11 @@ impl Storage {
                 difficulty = ?2,
                 due_date = ?3,
                 last_review = ?4,
-                review_count = review_count + 1,
-                current_presentation_count = 0
+                review_count = review_count + 1
              WHERE id = ?5",
             params![stability, difficulty, due, now, id],
         )?;
 
-        Ok(())
-    }
-
-    /// Increment presentation count for a card (called when card is shown but not scored)
-    pub fn increment_presentation_count(&self, id: i64) -> Result<()> {
-        self.conn.execute(
-            "UPDATE cards SET current_presentation_count = current_presentation_count + 1 WHERE id = ?1",
-            params![id],
-        )?;
         Ok(())
     }
 

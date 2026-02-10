@@ -4,13 +4,21 @@ use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
-    /// Timeout in seconds before auto-marking incorrect (default: 5)
+    /// Timeout in seconds before auto-marking incorrect (default: 10)
     #[serde(default = "default_timeout")]
     pub timeout_secs: u64,
 
     /// Maximum attempts before showing answer (default: 3)
     #[serde(default = "default_max_attempts")]
     pub max_attempts: u8,
+
+    /// Response time threshold in ms for Easy rating (default: 2000)
+    #[serde(default = "default_easy_threshold")]
+    pub easy_threshold_ms: u64,
+
+    /// Response time threshold in ms for Hard rating (default: 5000)
+    #[serde(default = "default_hard_threshold")]
+    pub hard_threshold_ms: u64,
 
     /// Delay in milliseconds to show success indicator (default: 500)
     #[serde(default = "default_success_delay")]
@@ -55,11 +63,19 @@ pub struct Config {
 }
 
 fn default_timeout() -> u64 {
-    5
+    10
 }
 
 fn default_max_attempts() -> u8 {
     3
+}
+
+fn default_easy_threshold() -> u64 {
+    2000
+}
+
+fn default_hard_threshold() -> u64 {
+    5000
 }
 
 fn default_success_delay() -> u64 {
@@ -111,6 +127,8 @@ impl Default for Config {
         Self {
             timeout_secs: default_timeout(),
             max_attempts: default_max_attempts(),
+            easy_threshold_ms: default_easy_threshold(),
+            hard_threshold_ms: default_hard_threshold(),
             success_delay_ms: default_success_delay(),
             failed_flash_delay_ms: default_failed_flash_delay(),
             pause_keybind: default_pause_keybind(),

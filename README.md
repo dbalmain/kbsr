@@ -75,6 +75,7 @@ kbsr uses the Kitty keyboard protocol for key detection. Supported terminals inc
 
 - [Deck Format](docs/decks.md) - How to create and structure deck files
 - [Configuration](docs/configuration.md) - All settings and their defaults
+- [Scheduling](docs/scheduling.md) - How FSRS scheduling and interval compression work
 - [Usage Guide](docs/usage.md) - Study flow, controls, and tips
 
 ## File Locations

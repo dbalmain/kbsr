@@ -3,12 +3,20 @@
 Configuration is optional. All settings have sensible defaults. To customize, create `~/.config/kbsr/config.toml`:
 
 ```toml
-# Timeout in seconds before marking as incorrect (default: 5)
+# Timeout in seconds before marking as incorrect (default: 10)
 # After timeout, you can keep trying but the card won't count as "first try correct"
-timeout_secs = 5
+timeout_secs = 10
 
 # Maximum attempts before revealing the answer (default: 3)
 max_attempts = 3
+
+# Response time threshold in ms for Easy rating (default: 2000)
+# Cards answered faster than this (1 attempt) are rated Easy
+easy_threshold_ms = 2000
+
+# Response time threshold in ms for Hard rating (default: 5000)
+# Cards answered slower than this are rated Hard
+hard_threshold_ms = 5000
 
 # Delay in ms to show success checkmark (default: 500)
 success_delay_ms = 500
@@ -49,8 +57,10 @@ max_interval_days = 30.0
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| `timeout_secs` | `5` | Seconds before auto-marking card as incorrect |
+| `timeout_secs` | `10` | Seconds before auto-marking card as incorrect |
 | `max_attempts` | `3` | Wrong attempts before answer is revealed |
+| `easy_threshold_ms` | `2000` | Response time threshold (ms) for Easy rating |
+| `hard_threshold_ms` | `5000` | Response time threshold (ms) for Hard rating |
 | `success_delay_ms` | `500` | How long the green checkmark is shown |
 | `failed_flash_delay_ms` | `500` | How long wrong input flashes red before retry |
 | `pause_keybind` | `Super+Ctrl+P` | Chord to pause the session |

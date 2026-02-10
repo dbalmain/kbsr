@@ -16,38 +16,34 @@ pub enum Rating {
 }
 
 impl Rating {
-    /// Derive rating from response time, attempts, and presentation count
-    /// This is called when the user got the answer correct on first attempt
-    /// presentation_count: how many times the card was shown before getting it right first try
-    pub fn from_performance(response_time_ms: u64, attempts: u8, presentation_count: i32) -> Self {
-        // If they needed multiple presentations to get it right, cap at Hard
-        // (even if they were fast this time, they struggled before)
-        if presentation_count > 0 {
-            // Many presentations = treat as Again for stronger reinforcement
-            if presentation_count >= 3 {
-                return Rating::Again;
-            }
-            // Some presentations = Hard at best
-            return Rating::Hard;
-        }
-
-        // Too many attempts = Again (shouldn't normally happen since we reveal at 3)
-        if attempts >= 3 {
+    /// Rate based on response speed and attempt count.
+    /// Thresholds should already be scaled for chord count by the caller.
+    pub fn from_speed(
+        response_time_ms: u64,
+        attempts: u8,
+        easy_threshold_ms: u64,
+        hard_threshold_ms: u64,
+        max_attempts: u8,
+    ) -> Self {
+        if attempts >= max_attempts {
             return Rating::Again;
         }
 
-        // 2 attempts or slow response (>= 5s) = Hard
-        if attempts == 2 || response_time_ms >= 5000 {
+        if attempts == 2 || response_time_ms >= hard_threshold_ms {
             return Rating::Hard;
         }
 
-        // Fast response with 1 attempt = Easy
-        if response_time_ms < 2000 && attempts == 1 {
+        if response_time_ms < easy_threshold_ms && attempts == 1 {
             return Rating::Easy;
         }
 
-        // Otherwise = Good
         Rating::Good
+    }
+
+    /// Scale a base threshold for multi-chord sequences: +20% per additional chord.
+    pub fn scale_threshold(base_ms: u64, num_chords: usize) -> u64 {
+        let multiplier = 1.0 + 0.2 * num_chords.saturating_sub(1) as f64;
+        (base_ms as f64 * multiplier) as u64
     }
 
     /// Convert to FSRS rating (1-4)
@@ -139,60 +135,77 @@ impl Scheduler {
 mod tests {
     use super::*;
 
+    const EASY: u64 = 2000;
+    const HARD: u64 = 5000;
+    const MAX: u8 = 3;
+
     #[test]
     fn test_rating_easy() {
-        // Fast, 1 attempt, no prior presentations
-        let rating = Rating::from_performance(1500, 1, 0);
+        let rating = Rating::from_speed(1500, 1, EASY, HARD, MAX);
         assert_eq!(rating, Rating::Easy);
     }
 
     #[test]
     fn test_rating_good() {
-        // Moderate time, 1 attempt, no prior presentations
-        let rating = Rating::from_performance(3000, 1, 0);
+        let rating = Rating::from_speed(3000, 1, EASY, HARD, MAX);
         assert_eq!(rating, Rating::Good);
     }
 
     #[test]
     fn test_rating_hard_time() {
-        // Slow response
-        let rating = Rating::from_performance(6000, 1, 0);
+        let rating = Rating::from_speed(6000, 1, EASY, HARD, MAX);
         assert_eq!(rating, Rating::Hard);
     }
 
     #[test]
     fn test_rating_hard_attempts() {
-        // 2 attempts
-        let rating = Rating::from_performance(2000, 2, 0);
+        let rating = Rating::from_speed(1000, 2, EASY, HARD, MAX);
         assert_eq!(rating, Rating::Hard);
     }
 
     #[test]
-    fn test_rating_hard_at_timeout() {
-        // At exactly the timeout threshold
-        let rating = Rating::from_performance(5000, 1, 0);
+    fn test_rating_hard_at_threshold() {
+        let rating = Rating::from_speed(5000, 1, EASY, HARD, MAX);
         assert_eq!(rating, Rating::Hard);
     }
 
     #[test]
     fn test_rating_again_attempts() {
-        // 3+ attempts
-        let rating = Rating::from_performance(2000, 3, 0);
+        let rating = Rating::from_speed(1000, 3, EASY, HARD, MAX);
         assert_eq!(rating, Rating::Again);
     }
 
     #[test]
-    fn test_rating_hard_with_presentations() {
-        // Fast but had 1-2 prior failed presentations = Hard at best
-        let rating = Rating::from_performance(1500, 1, 1);
+    fn test_rating_good_at_easy_boundary() {
+        let rating = Rating::from_speed(2000, 1, EASY, HARD, MAX);
+        assert_eq!(rating, Rating::Good);
+    }
+
+    #[test]
+    fn test_scale_threshold() {
+        assert_eq!(Rating::scale_threshold(2000, 1), 2000);
+        assert_eq!(Rating::scale_threshold(2000, 2), 2400);
+        assert_eq!(Rating::scale_threshold(2000, 3), 2800);
+        assert_eq!(Rating::scale_threshold(2000, 5), 3600);
+        assert_eq!(Rating::scale_threshold(5000, 3), 7000);
+    }
+
+    #[test]
+    fn test_scaled_thresholds_in_rating() {
+        let easy_3 = Rating::scale_threshold(EASY, 3);
+        let hard_3 = Rating::scale_threshold(HARD, 3);
+
+        let rating = Rating::from_speed(2700, 1, easy_3, hard_3, MAX);
+        assert_eq!(rating, Rating::Easy);
+
+        let rating = Rating::from_speed(2900, 1, easy_3, hard_3, MAX);
+        assert_eq!(rating, Rating::Good);
+
+        let rating = Rating::from_speed(6900, 1, easy_3, hard_3, MAX);
+        assert_eq!(rating, Rating::Good);
+
+        let rating = Rating::from_speed(7100, 1, easy_3, hard_3, MAX);
         assert_eq!(rating, Rating::Hard);
-    }
-
-    #[test]
-    fn test_rating_again_with_many_presentations() {
-        // 3+ prior presentations = Again
-        let rating = Rating::from_performance(1500, 1, 3);
-        assert_eq!(rating, Rating::Again);
     }
 
     #[test]
