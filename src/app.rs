@@ -240,6 +240,7 @@ impl App {
                         answer: &answer_str,
                         message,
                         show_success_checkmark: s.success_display_until.is_some(),
+                        card_cleared: !s.requeue_for_practice,
                         show_hints: self.show_hints,
                         pause_keybind: &pause_str,
                         quit_keybind: &quit_str,

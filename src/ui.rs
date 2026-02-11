@@ -35,6 +35,8 @@ pub struct UiState<'a> {
     pub message: Option<&'a str>,
     /// Whether to show the success checkmark
     pub show_success_checkmark: bool,
+    /// Whether the card was cleared (rated Easy, won't be re-queued)
+    pub card_cleared: bool,
     /// Whether to show key hints
     pub show_hints: bool,
     /// Configured pause keybind string
@@ -95,11 +97,15 @@ pub fn render(frame: &mut Frame, state: &UiState) {
             .alignment(Alignment::Center);
         frame.render_widget(message, chunks[6]);
     } else if state.show_success_checkmark {
-        let checkmark = Paragraph::new(Line::from(Span::styled(
-            "✓",
-            Style::default().fg(Color::Green),
-        )))
-        .alignment(Alignment::Center);
+        let style = if state.card_cleared {
+            Style::default()
+                .fg(Color::Green)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::DarkGray)
+        };
+        let checkmark =
+            Paragraph::new(Line::from(Span::styled("✓", style))).alignment(Alignment::Center);
         frame.render_widget(checkmark, chunks[5]);
     }
 
