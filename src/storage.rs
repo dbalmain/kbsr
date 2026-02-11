@@ -112,7 +112,6 @@ impl Storage {
                 due_date TEXT,
                 last_review TEXT,
                 review_count INTEGER DEFAULT 0,
-                current_presentation_count INTEGER DEFAULT 0,
                 UNIQUE(deck, keybind)
             );
 
@@ -162,8 +161,7 @@ impl Storage {
                         difficulty = CASE WHEN description != ?3 THEN NULL ELSE difficulty END,
                         due_date = CASE WHEN description != ?3 THEN NULL ELSE due_date END,
                         last_review = CASE WHEN description != ?3 THEN NULL ELSE last_review END,
-                        review_count = CASE WHEN description != ?3 THEN 0 ELSE review_count END,
-                        current_presentation_count = CASE WHEN description != ?3 THEN 0 ELSE current_presentation_count END",
+                        review_count = CASE WHEN description != ?3 THEN 0 ELSE review_count END",
                     params![deck.deck_name, keybind, description],
                 )?;
             }

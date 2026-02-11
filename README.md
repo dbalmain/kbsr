@@ -65,7 +65,7 @@ g g         	Go to top of file
 
 2. Run `kbsr`, select your deck, and start typing keybinds.
 
-Cards you get right are scheduled for future review. Cards you miss are repeated at the end of the session.
+Cards you get right are scheduled for future review. Cards you miss are repeated at the end of the session for practice, but only the first showing affects scheduling.
 
 ## Terminal Requirements
 

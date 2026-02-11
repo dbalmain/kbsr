@@ -6,9 +6,9 @@
 2. **Read the clue** - The description tells you what keybind to type
 3. **Type the keybind** - Press the actual keys (captured as raw key events)
 4. **Get feedback**:
-   - **Green checkmark**: Correct on first try - the card is scored and scheduled for future review
+   - **Green checkmark**: Correct - the card advances
    - **Red flash**: Wrong chord - try again from the beginning of the sequence
-   - **Timeout** (5s default): Card is marked as missed, but you can keep trying
+   - **Timeout** (10s default): Card is marked as missed, and the answer is revealed - momentum is key
    - **Max attempts** (3 default) or **Escape**: Answer is revealed
 5. **If the answer was revealed**: You must type the correct keybind to continue (reinforces muscle memory)
 6. **Session ends** when all due cards have been reviewed
@@ -42,16 +42,16 @@
 
 ## How Scoring Works
 
-The FSRS rating is determined by:
+Each card is scored on its **first showing** in a session. The rating is based on response speed and attempt count:
 
 | Rating | Condition |
 |--------|-----------|
-| **Easy** | Correct in < 2 seconds, first attempt, no prior presentations |
-| **Good** | Correct in 2-5 seconds, first attempt, no prior presentations |
-| **Hard** | Correct but slow (>= 5s), or took 2 attempts, or needed 1-2 prior presentations |
-| **Again** | 3+ attempts, or needed 3+ prior presentations this session |
+| **Easy** | Correct in < 2 seconds, first attempt |
+| **Good** | Correct in 2-5 seconds, first attempt |
+| **Hard** | Correct but slow (>= 5s), or took 2 attempts |
+| **Again** | 3+ attempts, or timed out |
 
-**Cards you miss** are pushed to the end of the current session queue with an incremented presentation count. This gives you another chance to practice, but repeated presentations reduce the rating even when you eventually get it right.
+Only the first showing affects FSRS scheduling. Cards that aren't rated Easy are pushed to the back of the session queue for more practice, but these repeats don't change the card's scheduling.
 
 ### Default Intervals (New Card)
 

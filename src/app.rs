@@ -55,14 +55,19 @@ struct SummaryState {
     stats: SessionStats,
 }
 
-#[derive(Default)]
 enum AppState {
-    #[default]
-    Idle,
     DeckSelection(DeckSelectionState),
     Studying(StudyState),
     Paused(PausedState),
     Summary(SummaryState),
+}
+
+impl Default for AppState {
+    fn default() -> Self {
+        AppState::DeckSelection(DeckSelectionState {
+            available_decks: Vec::new(),
+        })
+    }
 }
 
 pub struct App {
@@ -198,7 +203,6 @@ impl App {
 
     fn render(&self, frame: &mut Frame) {
         match &self.state {
-            AppState::Idle => unreachable!(),
             AppState::DeckSelection(s) => {
                 ui::render_deck_selection(
                     frame,
@@ -328,7 +332,6 @@ impl App {
                 }
 
                 match &self.state {
-                    AppState::Idle => unreachable!(),
                     AppState::DeckSelection(_) => self.handle_deck_selection_key(key)?,
                     AppState::Studying(_) => self.handle_studying_key(key)?,
                     AppState::Paused(_) => {}
@@ -385,7 +388,6 @@ impl App {
             return Ok(());
         }
 
-        // Escape reveals the answer (only when not already revealed)
         if key.code == KeyCode::Esc && study.attempts < self.config.max_attempts {
             study.attempts = self.config.max_attempts;
             study.matcher = Matcher::new(study.cards[study.card_idx].keybind.clone());
@@ -399,9 +401,11 @@ impl App {
                 let AppState::Studying(ref mut study) = self.state else {
                     unreachable!()
                 };
-                study.attempts += 1;
+                study.attempts = study.attempts.saturating_add(1);
                 let response_time_ms = study.card_start_time.elapsed().as_millis() as u64;
-                let num_chords = study.cards[study.card_idx].keybind.len();
+                let card = &study.cards[study.card_idx];
+                let card_id = card.stored.id;
+                let num_chords = card.keybind.len();
                 let easy_ms = Rating::scale_threshold(self.config.easy_threshold_ms, num_chords);
                 let hard_ms = Rating::scale_threshold(self.config.hard_threshold_ms, num_chords);
                 let rating = Rating::from_speed(
@@ -411,13 +415,31 @@ impl App {
                     hard_ms,
                     self.config.max_attempts,
                 );
-                let card_id = study.cards[study.card_idx].stored.id;
-                if !study.scored_card_ids.contains(&card_id) {
-                    self.score_card(rating)?;
+
+                if study.scored_card_ids.insert(card_id) {
+                    let memory_state = card.stored.stability.and_then(|s| {
+                        card.stored
+                            .difficulty
+                            .map(|d| Scheduler::memory_state_from_stored(s, d))
+                    });
+                    let last_review = card.stored.last_review;
+                    let (new_memory, due_date) =
+                        self.scheduler.schedule(memory_state, last_review, rating)?;
+                    self.storage.update_card_after_review(
+                        card_id,
+                        new_memory.stability,
+                        new_memory.difficulty,
+                        due_date,
+                    )?;
+                    self.storage.record_review(
+                        card_id,
+                        rating.as_u32() as i32,
+                        response_time_ms as i64,
+                        study.attempts as i32,
+                    )?;
+                    study.stats.reviewed += 1;
                 }
-                let AppState::Studying(ref mut study) = self.state else {
-                    unreachable!()
-                };
+
                 if rating != Rating::Easy {
                     study.requeue_for_practice = true;
                 }
@@ -425,7 +447,7 @@ impl App {
                     Some(Instant::now() + Duration::from_millis(self.config.success_delay_ms));
             }
             MatchState::Failed(_) => {
-                study.attempts += 1;
+                study.attempts = study.attempts.saturating_add(1);
                 study.failed_display_until =
                     Some(Instant::now() + Duration::from_millis(self.config.failed_flash_delay_ms));
             }
@@ -521,45 +543,6 @@ impl App {
             study.attempts = 0;
             study.requeue_for_practice = false;
         }
-    }
-
-    fn score_card(&mut self, rating: Rating) -> Result<()> {
-        let AppState::Studying(ref mut study) = self.state else {
-            return Ok(());
-        };
-        let Some(card) = study.cards.get(study.card_idx) else {
-            return Ok(());
-        };
-        let response_time_ms = study.card_start_time.elapsed().as_millis() as u64;
-        let attempts = study.attempts;
-        let card_id = card.stored.id;
-        let memory_state = card.stored.stability.and_then(|s| {
-            card.stored
-                .difficulty
-                .map(|d| Scheduler::memory_state_from_stored(s, d))
-        });
-        let last_review = card.stored.last_review;
-
-        let (new_memory, due_date) = self.scheduler.schedule(memory_state, last_review, rating)?;
-        self.storage.update_card_after_review(
-            card_id,
-            new_memory.stability,
-            new_memory.difficulty,
-            due_date,
-        )?;
-        self.storage.record_review(
-            card_id,
-            rating.as_u32() as i32,
-            response_time_ms as i64,
-            attempts as i32,
-        )?;
-
-        let AppState::Studying(ref mut study) = self.state else {
-            return Ok(());
-        };
-        study.scored_card_ids.insert(card_id);
-        study.stats.reviewed += 1;
-        Ok(())
     }
 
     fn next_card(&mut self, mut study: StudyState) -> Result<()> {
