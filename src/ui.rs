@@ -43,6 +43,8 @@ pub struct UiState<'a> {
     pub pause_keybind: &'a str,
     /// Configured quit keybind string
     pub quit_keybind: &'a str,
+    /// Number of cards remaining in the session
+    pub cards_remaining: usize,
 }
 
 /// Render the minimal UI
@@ -110,7 +112,13 @@ pub fn render(frame: &mut Frame, state: &UiState) {
     }
 
     if state.show_hints {
-        render_study_hints(frame, area, state.pause_keybind, state.quit_keybind);
+        render_study_hints(
+            frame,
+            area,
+            state.pause_keybind,
+            state.quit_keybind,
+            state.cards_remaining,
+        );
     }
 }
 
@@ -272,7 +280,13 @@ pub fn render_summary(
     }
 }
 
-fn render_study_hints(frame: &mut Frame, area: Rect, pause_keybind: &str, quit_keybind: &str) {
+fn render_study_hints(
+    frame: &mut Frame,
+    area: Rect,
+    pause_keybind: &str,
+    quit_keybind: &str,
+    cards_remaining: usize,
+) {
     let bar_area = Rect {
         x: area.x,
         y: area.y + area.height.saturating_sub(2),
@@ -282,6 +296,9 @@ fn render_study_hints(frame: &mut Frame, area: Rect, pause_keybind: &str, quit_k
 
     let key_style = Style::default().fg(Color::Cyan);
     let desc_style = Style::default().fg(Color::DarkGray);
+    let progress_style = Style::default()
+        .fg(Color::White)
+        .add_modifier(Modifier::DIM);
 
     let mut spans = Vec::new();
 
@@ -306,6 +323,11 @@ fn render_study_hints(frame: &mut Frame, area: Rect, pause_keybind: &str, quit_k
         spans.push(Span::styled("quit", desc_style));
         spans.push(Span::raw("  "));
     }
+
+    spans.push(Span::styled(
+        format!("•  {}", cards_remaining),
+        progress_style,
+    ));
 
     let paragraph = Paragraph::new(Line::from(spans)).alignment(Alignment::Center);
     frame.render_widget(paragraph, bar_area);

@@ -244,6 +244,7 @@ impl App {
                         show_hints: self.show_hints,
                         pause_keybind: &pause_str,
                         quit_keybind: &quit_str,
+                        cards_remaining: s.cards.len() - s.card_idx,
                     };
                     ui::render(frame, &ui_state);
                 }

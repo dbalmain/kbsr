@@ -71,11 +71,11 @@ fn default_max_attempts() -> u8 {
 }
 
 fn default_easy_threshold() -> u64 {
-    2000
+    3000
 }
 
 fn default_hard_threshold() -> u64 {
-    5000
+    6000
 }
 
 fn default_success_delay() -> u64 {
