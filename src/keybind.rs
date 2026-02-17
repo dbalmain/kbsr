@@ -1,3 +1,4 @@
+use crate::deck::KeyboardMode;
 use anyhow::{Result, bail};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use std::fmt;
@@ -48,9 +49,10 @@ impl Chord {
 
     /// Check if this chord matches a key event
     /// Handles both keyboard modes:
-    /// - Chars mode: crossterm converts Shift+g to 'G', so exact match works
-    /// - Raw mode: Shift+g stays as Shift+g, so we check if uppercase matches
-    pub fn matches(&self, event: &KeyEvent) -> bool {
+    /// - Chars mode: exact character match (case-sensitive), including with modifiers
+    /// - Raw mode: Shift+g stays as Shift+g, so we check if uppercase matches;
+    ///   modified keys use case-insensitive char (terminals report Ctrl+s for Ctrl+S)
+    pub fn matches(&self, event: &KeyEvent, mode: KeyboardMode) -> bool {
         match (&self.0.code, &event.code) {
             (KeyCode::Char(expected), KeyCode::Char(actual)) => {
                 if self.0.modifiers == KeyModifiers::NONE {
@@ -68,8 +70,11 @@ impl Chord {
                         }
                     }
                     false
+                } else if mode == KeyboardMode::Chars {
+                    // Chars mode: require modifier match and case-sensitive char
+                    self.0.modifiers == event.modifiers && *expected == *actual
                 } else {
-                    // Has explicit modifiers: require modifier match and case-insensitive char
+                    // Raw mode: require modifier match and case-insensitive char
                     self.0.modifiers == event.modifiers && expected.eq_ignore_ascii_case(actual)
                 }
             }
@@ -150,6 +155,7 @@ fn parse_key_code(s: &str) -> Result<KeyCode> {
     // Named keys (case-insensitive)
     let lower = s.to_lowercase();
     let code = match lower.as_str() {
+        "backslash" => KeyCode::Char('\\'),
         "backspace" | "back" => KeyCode::Backspace,
         "enter" | "return" => KeyCode::Enter,
         "left" => KeyCode::Left,
@@ -308,24 +314,41 @@ mod tests {
     }
 
     #[test]
-    fn test_chord_matches() {
+    fn test_chord_matches_raw_mode() {
         let chord = Chord::parse("Ctrl+S").unwrap();
 
-        // Uppercase matches
+        // Uppercase matches in raw mode
         let event = KeyEvent::new(KeyCode::Char('S'), KeyModifiers::CONTROL);
-        assert!(chord.matches(&event));
+        assert!(chord.matches(&event, KeyboardMode::Raw));
 
-        // Lowercase also matches (crossterm reports Ctrl+S as lowercase)
+        // Lowercase also matches in raw mode (crossterm reports Ctrl+S as lowercase)
         let lowercase_event = KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL);
-        assert!(chord.matches(&lowercase_event));
+        assert!(chord.matches(&lowercase_event, KeyboardMode::Raw));
 
         // Different key doesn't match
         let wrong_key = KeyEvent::new(KeyCode::Char('x'), KeyModifiers::CONTROL);
-        assert!(!chord.matches(&wrong_key));
+        assert!(!chord.matches(&wrong_key, KeyboardMode::Raw));
 
         // Different modifiers don't match
         let wrong_mods = KeyEvent::new(KeyCode::Char('s'), KeyModifiers::ALT);
-        assert!(!chord.matches(&wrong_mods));
+        assert!(!chord.matches(&wrong_mods, KeyboardMode::Raw));
+    }
+
+    #[test]
+    fn test_chord_matches_chars_mode_case_sensitive() {
+        // In chars mode, Ctrl+R should NOT match Ctrl+r
+        let chord = Chord::parse("Ctrl+R").unwrap();
+        let event_lower = KeyEvent::new(KeyCode::Char('r'), KeyModifiers::CONTROL);
+        assert!(!chord.matches(&event_lower, KeyboardMode::Chars));
+
+        // Ctrl+R should match Ctrl+R exactly
+        let event_upper = KeyEvent::new(KeyCode::Char('R'), KeyModifiers::CONTROL);
+        assert!(chord.matches(&event_upper, KeyboardMode::Chars));
+
+        // Ctrl+r in deck should match Ctrl+r
+        let chord_lower = Chord::parse("Ctrl+r").unwrap();
+        assert!(chord_lower.matches(&event_lower, KeyboardMode::Chars));
+        assert!(!chord_lower.matches(&event_upper, KeyboardMode::Chars));
     }
 
     #[test]
@@ -335,23 +358,23 @@ mod tests {
         assert_eq!(chord.0.modifiers, KeyModifiers::NONE);
 
         let event = KeyEvent::new(KeyCode::Char('$'), KeyModifiers::NONE);
-        assert!(chord.matches(&event));
+        assert!(chord.matches(&event, KeyboardMode::Chars));
 
         // Wrong character doesn't match
         let wrong = KeyEvent::new(KeyCode::Char('4'), KeyModifiers::NONE);
-        assert!(!chord.matches(&wrong));
+        assert!(!chord.matches(&wrong, KeyboardMode::Chars));
 
         // `G` chord matches 'G' character (Chars mode)
         let chord_g = Chord::parse("G").unwrap();
         let event_g = KeyEvent::new(KeyCode::Char('G'), KeyModifiers::NONE);
-        assert!(chord_g.matches(&event_g));
+        assert!(chord_g.matches(&event_g, KeyboardMode::Chars));
 
         // `G` chord also matches Shift+g (Raw mode)
         let event_shift_g = KeyEvent::new(KeyCode::Char('g'), KeyModifiers::SHIFT);
-        assert!(chord_g.matches(&event_shift_g));
+        assert!(chord_g.matches(&event_shift_g, KeyboardMode::Raw));
 
         // Lowercase 'g' without Shift does NOT match 'G' chord
         let event_lower = KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE);
-        assert!(!chord_g.matches(&event_lower));
+        assert!(!chord_g.matches(&event_lower, KeyboardMode::Chars));
     }
 }

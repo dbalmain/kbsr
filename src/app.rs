@@ -307,7 +307,7 @@ impl App {
                 }
 
                 if let Some(ref quit_chord) = self.quit_chord
-                    && quit_chord.matches(&key)
+                    && quit_chord.matches(&key, KeyboardMode::Raw)
                 {
                     if matches!(self.state, AppState::DeckSelection(_)) {
                         self.should_exit = true;
@@ -319,7 +319,7 @@ impl App {
                 }
 
                 if let Some(ref pause_chord) = self.pause_chord
-                    && pause_chord.matches(&key)
+                    && pause_chord.matches(&key, KeyboardMode::Raw)
                 {
                     if matches!(self.state, AppState::Paused(_)) {
                         self.resume();
@@ -392,7 +392,10 @@ impl App {
 
         if key.code == KeyCode::Esc && study.attempts < self.config.max_attempts {
             study.attempts = self.config.max_attempts;
-            study.matcher = Matcher::new(study.cards[study.card_idx].keybind.clone());
+            study.matcher = Matcher::new(
+                study.cards[study.card_idx].keybind.clone(),
+                self.current_keyboard_mode.unwrap_or_default(),
+            );
             return Ok(());
         }
 
@@ -507,7 +510,7 @@ impl App {
                 cards.shuffle(&mut rand::rng());
             }
 
-            let matcher = Matcher::new(cards[0].keybind.clone());
+            let matcher = Matcher::new(cards[0].keybind.clone(), keyboard_mode);
 
             self.state = AppState::Studying(StudyState {
                 cards,
@@ -538,9 +541,9 @@ impl App {
         Ok(())
     }
 
-    fn setup_current_card(study: &mut StudyState) {
+    fn setup_current_card(study: &mut StudyState, mode: KeyboardMode) {
         if let Some(card) = study.cards.get(study.card_idx) {
-            study.matcher = Matcher::new(card.keybind.clone());
+            study.matcher = Matcher::new(card.keybind.clone(), mode);
             study.card_start_time = Instant::now();
             study.attempts = 0;
             study.requeue_for_practice = false;
@@ -566,7 +569,7 @@ impl App {
             self.pop_keyboard_mode();
             self.state = AppState::Summary(SummaryState { stats: study.stats });
         } else {
-            Self::setup_current_card(&mut study);
+            Self::setup_current_card(&mut study, self.current_keyboard_mode.unwrap_or_default());
             self.state = AppState::Studying(study);
         }
 
@@ -602,7 +605,10 @@ impl App {
 
         if elapsed >= timeout && study.attempts < self.config.max_attempts {
             study.attempts = self.config.max_attempts;
-            study.matcher = Matcher::new(study.cards[study.card_idx].keybind.clone());
+            study.matcher = Matcher::new(
+                study.cards[study.card_idx].keybind.clone(),
+                self.current_keyboard_mode.unwrap_or_default(),
+            );
         }
     }
 }

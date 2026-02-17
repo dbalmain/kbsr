@@ -1,3 +1,4 @@
+use crate::deck::KeyboardMode;
 use crate::keybind::{Chord, Keybind, key_event_to_chord};
 use crossterm::event::KeyEvent;
 
@@ -36,15 +37,17 @@ impl MatchState {
 /// Matcher for tracking input against expected keybind
 pub struct Matcher {
     expected: Keybind,
+    mode: KeyboardMode,
     typed: Vec<Chord>,
     failed: bool,
 }
 
 impl Matcher {
     /// Create a new matcher for the given keybind
-    pub fn new(expected: Keybind) -> Self {
+    pub fn new(expected: Keybind, mode: KeyboardMode) -> Self {
         Self {
             expected,
+            mode,
             typed: Vec::new(),
             failed: false,
         }
@@ -72,7 +75,7 @@ impl Matcher {
         }
         let expected_chord = &self.expected.0[position];
 
-        if !expected_chord.matches(&event) {
+        if !expected_chord.matches(&event, self.mode) {
             // Wrong chord - fail
             self.failed = true;
             return MatchState::Failed(self.typed.clone());
@@ -117,7 +120,7 @@ mod tests {
     #[test]
     fn test_single_chord_match() {
         let kb = Keybind::parse("Ctrl+S").unwrap();
-        let mut matcher = Matcher::new(kb);
+        let mut matcher = Matcher::new(kb, KeyboardMode::Raw);
 
         let state = matcher.process(make_event(KeyCode::Char('S'), KeyModifiers::CONTROL));
         assert!(state.is_complete());
@@ -126,7 +129,7 @@ mod tests {
     #[test]
     fn test_single_chord_fail() {
         let kb = Keybind::parse("Ctrl+S").unwrap();
-        let mut matcher = Matcher::new(kb);
+        let mut matcher = Matcher::new(kb, KeyboardMode::Raw);
 
         let state = matcher.process(make_event(KeyCode::Char('X'), KeyModifiers::CONTROL));
         assert!(state.is_failed());
@@ -135,7 +138,7 @@ mod tests {
     #[test]
     fn test_multi_chord_progress() {
         let kb = Keybind::parse("g g").unwrap();
-        let mut matcher = Matcher::new(kb);
+        let mut matcher = Matcher::new(kb, KeyboardMode::Chars);
 
         let state = matcher.process(make_event(KeyCode::Char('g'), KeyModifiers::NONE));
         assert!(matches!(state, MatchState::InProgress(_)));
@@ -147,7 +150,7 @@ mod tests {
     #[test]
     fn test_multi_chord_fail_mid() {
         let kb = Keybind::parse("Ctrl+K Ctrl+C").unwrap();
-        let mut matcher = Matcher::new(kb);
+        let mut matcher = Matcher::new(kb, KeyboardMode::Raw);
 
         let state = matcher.process(make_event(KeyCode::Char('K'), KeyModifiers::CONTROL));
         assert!(matches!(state, MatchState::InProgress(_)));
@@ -160,7 +163,7 @@ mod tests {
     #[test]
     fn test_reset_after_fail() {
         let kb = Keybind::parse("g g").unwrap();
-        let mut matcher = Matcher::new(kb);
+        let mut matcher = Matcher::new(kb, KeyboardMode::Chars);
 
         // Fail first
         let _ = matcher.process(make_event(KeyCode::Char('x'), KeyModifiers::NONE));
