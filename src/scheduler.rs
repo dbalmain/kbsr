@@ -117,7 +117,8 @@ impl Scheduler {
         // Calculate due date from interval, applying modifier and cap
         let interval_days =
             (item_state.interval * self.interval_modifier).min(self.max_interval_days);
-        let due_date = Utc::now() + Duration::seconds((interval_days * 86400.0) as i64);
+        let due_date =
+            Utc::now() + Duration::seconds((interval_days * 86400.0) as i64) + Duration::hours(1);
 
         Ok((item_state.memory, due_date))
     }
