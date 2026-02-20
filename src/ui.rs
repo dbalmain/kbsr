@@ -161,7 +161,7 @@ pub fn render_deck_selection(
     let chunks = Layout::vertical([
         Constraint::Fill(1),
         Constraint::Length(2),
-        Constraint::Length((decks.len() + 2) as u16),
+        Constraint::Length((decks.len() + 1) as u16),
         Constraint::Fill(1),
     ])
     .split(area);
@@ -192,19 +192,6 @@ pub fn render_deck_selection(
         ));
         lines.push(line);
     }
-
-    // Add "All decks" option
-    let all_idx = decks.len();
-    let prefix = if selected == all_idx { "> " } else { "  " };
-    let style = if selected == all_idx {
-        Style::default().fg(Color::Cyan)
-    } else {
-        Style::default().fg(Color::White)
-    };
-    lines.push(Line::from(Span::styled(
-        format!("{}All decks", prefix),
-        style,
-    )));
 
     let list = Paragraph::new(lines).alignment(Alignment::Center);
     frame.render_widget(list, chunks[2]);

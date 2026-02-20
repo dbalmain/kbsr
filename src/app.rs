@@ -169,7 +169,7 @@ impl App {
 
     fn refresh_deck_stats(&mut self) -> Result<()> {
         let available_decks = self.storage.get_deck_stats(&self.keyboard_modes)?;
-        self.selected_deck_idx = self.selected_deck_idx.min(available_decks.len());
+        self.selected_deck_idx = self.selected_deck_idx.min(available_decks.len().saturating_sub(1));
         self.state = AppState::DeckSelection(DeckSelectionState { available_decks });
         Ok(())
     }
@@ -358,7 +358,7 @@ impl App {
                 }
             }
             KeyCode::Down | KeyCode::Char('j') => {
-                if self.selected_deck_idx < s.available_decks.len() {
+                if self.selected_deck_idx + 1 < s.available_decks.len() {
                     self.selected_deck_idx += 1;
                 }
             }
@@ -476,23 +476,10 @@ impl App {
             end_time: None,
         };
 
-        let keyboard_mode = if self.selected_deck_idx < deck_selection.available_decks.len() {
-            let deck = &deck_selection.available_decks[self.selected_deck_idx];
-            let mode = deck.keyboard_mode;
-            let name = deck.name.clone();
-            self.load_due_cards(&name, &mut cards)?;
-            mode
-        } else {
-            let deck_names: Vec<String> = deck_selection
-                .available_decks
-                .iter()
-                .map(|d| d.name.clone())
-                .collect();
-            for name in &deck_names {
-                self.load_due_cards(name, &mut cards)?;
-            }
-            KeyboardMode::Raw
-        };
+        let deck = &deck_selection.available_decks[self.selected_deck_idx];
+        let keyboard_mode = deck.keyboard_mode;
+        let name = deck.name.clone();
+        self.load_due_cards(&name, &mut cards)?;
 
         if cards.is_empty() {
             self.state = AppState::Summary(SummaryState {
