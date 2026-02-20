@@ -202,9 +202,9 @@ impl Storage {
         Ok(())
     }
 
-    /// Get due cards for a deck (due by end of today in local timezone, or never reviewed)
+    /// Get due cards for a deck (due now or never reviewed)
     pub fn get_due_cards(&self, deck: &str) -> Result<Vec<StoredCard>> {
-        let end_of_today_utc = end_of_today_utc();
+        let now = Utc::now().to_rfc3339();
 
         let mut stmt = self.conn.prepare(
             "SELECT id, deck, keybind, description, stability, difficulty,
@@ -215,7 +215,7 @@ impl Storage {
         )?;
 
         let cards = stmt
-            .query_map(params![deck, end_of_today_utc], row_to_stored_card)?
+            .query_map(params![deck, now], row_to_stored_card)?
             .collect::<Result<Vec<_>, _>>()?;
 
         Ok(cards)
