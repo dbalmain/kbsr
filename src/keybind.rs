@@ -70,7 +70,7 @@ impl Chord {
                         }
                     }
                     false
-                } else if mode == KeyboardMode::Chars {
+                } else if mode == KeyboardMode::Chars || mode == KeyboardMode::Command {
                     // Chars mode: require modifier match and case-sensitive char
                     self.0.modifiers == event.modifiers && *expected == *actual
                 } else {
@@ -129,6 +129,35 @@ impl Keybind {
         let chords: Result<Vec<Chord>> = s.split_whitespace().map(Chord::parse).collect();
 
         Ok(Keybind(chords?))
+    }
+
+    /// Parse a command string where each character becomes its own chord,
+    /// with an implicit Enter chord appended to require submission.
+    /// e.g., "ls -la" → [l, s, ' ', -, l, a, Enter]
+    pub fn parse_command(s: &str) -> Result<Self> {
+        let s = s.trim();
+        if s.is_empty() {
+            bail!("Empty command");
+        }
+        let mut chords: Vec<Chord> = s
+            .chars()
+            .map(|c| Chord(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE)))
+            .collect();
+        chords.push(Chord(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)));
+        Ok(Keybind(chords))
+    }
+
+    /// Format as a command string (join chars without separators).
+    /// Skips the trailing Enter chord (implicit submit).
+    pub fn as_command_string(&self) -> String {
+        self.0
+            .iter()
+            .filter(|chord| chord.0.code != KeyCode::Enter)
+            .map(|chord| match chord.0.code {
+                KeyCode::Char(c) => c.to_string(),
+                _ => format_key_code(&chord.0.code),
+            })
+            .collect()
     }
 
     /// Number of chords in this keybind
@@ -349,6 +378,44 @@ mod tests {
         let chord_lower = Chord::parse("Ctrl+r").unwrap();
         assert!(chord_lower.matches(&event_lower, KeyboardMode::Chars));
         assert!(!chord_lower.matches(&event_upper, KeyboardMode::Chars));
+    }
+
+    #[test]
+    fn test_parse_command() {
+        let kb = Keybind::parse_command("ls -la").unwrap();
+        assert_eq!(kb.len(), 7); // 6 chars + Enter
+        assert_eq!(kb.0[0].0.code, KeyCode::Char('l'));
+        assert_eq!(kb.0[1].0.code, KeyCode::Char('s'));
+        assert_eq!(kb.0[2].0.code, KeyCode::Char(' '));
+        assert_eq!(kb.0[3].0.code, KeyCode::Char('-'));
+        assert_eq!(kb.0[4].0.code, KeyCode::Char('l'));
+        assert_eq!(kb.0[5].0.code, KeyCode::Char('a'));
+        assert_eq!(kb.0[6].0.code, KeyCode::Enter);
+        for chord in &kb.0 {
+            assert_eq!(chord.0.modifiers, KeyModifiers::NONE);
+        }
+    }
+
+    #[test]
+    fn test_parse_command_empty() {
+        assert!(Keybind::parse_command("").is_err());
+        assert!(Keybind::parse_command("   ").is_err());
+    }
+
+    #[test]
+    fn test_as_command_string() {
+        let kb = Keybind::parse_command("ls -la").unwrap();
+        assert_eq!(kb.as_command_string(), "ls -la");
+
+        let kb2 = Keybind::parse_command("git stash pop").unwrap();
+        assert_eq!(kb2.as_command_string(), "git stash pop");
+    }
+
+    #[test]
+    fn test_command_roundtrip() {
+        let original = "docker compose up -d";
+        let kb = Keybind::parse_command(original).unwrap();
+        assert_eq!(kb.as_command_string(), original);
     }
 
     #[test]

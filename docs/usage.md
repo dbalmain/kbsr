@@ -2,7 +2,7 @@
 
 ## Study Flow
 
-1. **Select a deck** - Pick a single deck or "All decks"
+1. **Select a deck** - Pick a deck to study
 2. **Read the clue** - The description tells you what keybind to type
 3. **Type the keybind** - Press the actual keys (captured as raw key events)
 4. **Get feedback**:

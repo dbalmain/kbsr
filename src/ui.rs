@@ -1,5 +1,6 @@
 use crate::matcher::MatchState;
 use crate::storage::DeckStats;
+use crossterm::event::KeyCode;
 use ratatui::{
     Frame,
     layout::{Alignment, Constraint, Layout, Rect},
@@ -45,6 +46,8 @@ pub struct UiState<'a> {
     pub quit_keybind: &'a str,
     /// Number of cards remaining in the session
     pub cards_remaining: usize,
+    /// Whether the current deck is in commands mode
+    pub is_command_mode: bool,
 }
 
 /// Render the minimal UI
@@ -76,7 +79,7 @@ pub fn render(frame: &mut Frame, state: &UiState) {
     frame.render_widget(clue, chunks[2]);
 
     // Render typed keys with appropriate color
-    let typed_line = render_typed_chords(state.match_state);
+    let typed_line = render_typed_chords(state.match_state, state.is_command_mode);
     let typed = Paragraph::new(typed_line).alignment(Alignment::Center);
     frame.render_widget(typed, chunks[3]);
 
@@ -123,18 +126,29 @@ pub fn render(frame: &mut Frame, state: &UiState) {
 }
 
 /// Render the typed chords with appropriate coloring
-fn render_typed_chords(state: &MatchState) -> Line<'static> {
+fn render_typed_chords(state: &MatchState, is_command_mode: bool) -> Line<'static> {
     let chords = state.typed_chords();
 
     if chords.is_empty() {
         return Line::from("");
     }
 
-    let text: String = chords
-        .iter()
-        .map(|c| c.to_string())
-        .collect::<Vec<_>>()
-        .join(" ");
+    let text: String = if is_command_mode {
+        chords
+            .iter()
+            .filter(|c| c.0.code != KeyCode::Enter)
+            .map(|c| match c.0.code {
+                KeyCode::Char(ch) => ch.to_string(),
+                _ => c.to_string(),
+            })
+            .collect()
+    } else {
+        chords
+            .iter()
+            .map(|c| c.to_string())
+            .collect::<Vec<_>>()
+            .join(" ")
+    };
 
     let color = match state {
         MatchState::InProgress(_) => Color::Green,

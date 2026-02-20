@@ -14,7 +14,7 @@ Built with Rust and [ratatui](https://github.com/ratatui/ratatui), using the [FS
 
 - Learn keybindings by actually typing them
 - Spaced repetition scheduling via the FSRS algorithm
-- Two keyboard modes: **raw** (Shift-g, Shift-4) and **chars** (G, $)
+- Three keyboard modes: **raw** (Shift-g, Shift-4), **chars** (G, $), and **command** (ls -la, git stash)
 - Multi-chord sequences like `Ctrl+K Ctrl+C` or `y s i w )`
 - Visual feedback: green for correct chords, red for mistakes
 - Pause/resume, card shuffling, session statistics

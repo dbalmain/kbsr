@@ -152,7 +152,14 @@ impl App {
             let keybinds = deck
                 .cards
                 .iter()
-                .map(|card| (card.keybind.to_string(), card.description.clone()))
+                .map(|card| {
+                    let keybind_str = if deck.keyboard_mode == KeyboardMode::Command {
+                        card.keybind.as_command_string()
+                    } else {
+                        card.keybind.to_string()
+                    };
+                    (keybind_str, card.description.clone())
+                })
                 .collect();
 
             sync_inputs.push(DeckSyncInput {
@@ -169,7 +176,9 @@ impl App {
 
     fn refresh_deck_stats(&mut self) -> Result<()> {
         let available_decks = self.storage.get_deck_stats(&self.keyboard_modes)?;
-        self.selected_deck_idx = self.selected_deck_idx.min(available_decks.len().saturating_sub(1));
+        self.selected_deck_idx = self
+            .selected_deck_idx
+            .min(available_decks.len().saturating_sub(1));
         self.state = AppState::DeckSelection(DeckSelectionState { available_decks });
         Ok(())
     }
@@ -182,7 +191,7 @@ impl App {
                 KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES
                     | KeyboardEnhancementFlags::REPORT_ALL_KEYS_AS_ESCAPE_CODES
             }
-            KeyboardMode::Chars => {
+            KeyboardMode::Chars | KeyboardMode::Command => {
                 KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES
                     | KeyboardEnhancementFlags::REPORT_ALL_KEYS_AS_ESCAPE_CODES
                     | KeyboardEnhancementFlags::REPORT_ALTERNATE_KEYS
@@ -221,7 +230,11 @@ impl App {
                         None
                     };
 
-                    let answer_str = card.keybind.to_string();
+                    let answer_str = if self.current_keyboard_mode == Some(KeyboardMode::Command) {
+                        card.keybind.as_command_string()
+                    } else {
+                        card.keybind.to_string()
+                    };
                     let pause_str = self
                         .pause_chord
                         .as_ref()
@@ -245,6 +258,7 @@ impl App {
                         pause_keybind: &pause_str,
                         quit_keybind: &quit_str,
                         cards_remaining: s.cards.len() - s.card_idx,
+                        is_command_mode: self.current_keyboard_mode == Some(KeyboardMode::Command),
                     };
                     ui::render(frame, &ui_state);
                 }
@@ -479,7 +493,7 @@ impl App {
         let deck = &deck_selection.available_decks[self.selected_deck_idx];
         let keyboard_mode = deck.keyboard_mode;
         let name = deck.name.clone();
-        self.load_due_cards(&name, &mut cards)?;
+        self.load_due_cards(&name, keyboard_mode, &mut cards)?;
 
         if cards.is_empty() {
             self.state = AppState::Summary(SummaryState {
@@ -516,11 +530,21 @@ impl App {
         Ok(())
     }
 
-    fn load_due_cards(&mut self, deck_name: &str, cards: &mut Vec<StudyCard>) -> Result<()> {
+    fn load_due_cards(
+        &mut self,
+        deck_name: &str,
+        mode: KeyboardMode,
+        cards: &mut Vec<StudyCard>,
+    ) -> Result<()> {
         let stored_cards = self.storage.get_due_cards(deck_name)?;
 
         for stored in stored_cards {
-            if let Ok(keybind) = Keybind::parse(&stored.keybind) {
+            let keybind = if mode == KeyboardMode::Command {
+                Keybind::parse_command(&stored.keybind)
+            } else {
+                Keybind::parse(&stored.keybind)
+            };
+            if let Ok(keybind) = keybind {
                 cards.push(StudyCard { stored, keybind });
             }
         }

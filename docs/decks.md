@@ -41,6 +41,20 @@ Ctrl+R	Redo
 
 In chars mode, typing `Shift+g` produces `G`, and `Shift+4` produces `$`. The keybind is matched against the character, not the physical keys.
 
+### Command Mode
+
+Best for learning **CLI commands** like git, docker, kubectl, etc:
+
+```tsv
+# mode: command
+ls -la	List files with details
+git stash pop	Apply and drop latest stash
+docker compose up -d	Start containers in background
+kubectl get pods	List pods
+```
+
+In command mode, each character of the command (including spaces) becomes its own input. You type the command character by character and press `Enter` to submit. The answer is displayed as the full command string.
+
 ## Multi-Chord Sequences
 
 Keybinds can contain multiple chords separated by spaces. Each chord is typed sequentially:
@@ -87,6 +101,16 @@ Ctrl+R	Redo
 ?	Search backward
 n	Next match
 N	Previous match
+```
+
+### git.tsv
+
+```tsv
+# mode: command
+git stash	Stash changes
+git stash pop	Apply and drop latest stash
+git rebase -i HEAD~3	Interactive rebase last 3 commits
+git log --oneline	Compact log
 ```
 
 ### hyprland.tsv

@@ -12,6 +12,9 @@ pub enum KeyboardMode {
     /// Character mode: report the resulting character (e.g., G, $, !)
     /// Best for vim-style bindings
     Chars,
+    /// Command mode: each character in a CLI command becomes its own chord
+    /// Best for learning CLI commands (e.g., `ls -la`, `git stash pop`)
+    Command,
 }
 
 /// A single card in a deck
@@ -64,8 +67,9 @@ impl Deck {
                         match mode_value.trim().to_lowercase().as_str() {
                             "raw" => keyboard_mode = KeyboardMode::Raw,
                             "chars" | "char" | "characters" => keyboard_mode = KeyboardMode::Chars,
+                            "command" | "commands" => keyboard_mode = KeyboardMode::Command,
                             other => anyhow::bail!(
-                                "Unknown keyboard mode '{}' on line {} in {}. Use 'raw' or 'chars'.",
+                                "Unknown keyboard mode '{}' on line {} in {}. Use 'raw', 'chars', or 'commands'.",
                                 other,
                                 line_num + 1,
                                 path.display()
@@ -85,7 +89,12 @@ impl Deck {
                 );
             }
 
-            let keybind = Keybind::parse(parts[0]).with_context(|| {
+            let keybind = if keyboard_mode == KeyboardMode::Command {
+                Keybind::parse_command(parts[0])
+            } else {
+                Keybind::parse(parts[0])
+            }
+            .with_context(|| {
                 format!(
                     "Failed to parse keybind on line {} in {}",
                     line_num + 1,
