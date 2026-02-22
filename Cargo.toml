@@ -10,7 +10,7 @@ keywords = ["spaced-repetition", "keyboard", "keybinds", "tui", "learning"]
 categories = ["command-line-utilities"]
 
 [dependencies]
-anyhow = "1.0.101"
+anyhow = "1.0.102"
 chrono = { version = "0.4.43", features = ["serde"] }
 crossterm = "0.29.0"
 dirs = "6.0.0"
