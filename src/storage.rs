@@ -49,20 +49,6 @@ fn row_to_stored_card(row: &rusqlite::Row) -> rusqlite::Result<StoredCard> {
     })
 }
 
-fn end_of_today_utc() -> String {
-    let today = Local::now().date_naive();
-    let end_of_today = today
-        .succ_opt()
-        .unwrap_or(today)
-        .and_hms_opt(0, 0, 0)
-        .unwrap();
-    end_of_today
-        .and_local_timezone(Local)
-        .unwrap()
-        .with_timezone(&Utc)
-        .to_rfc3339()
-}
-
 /// A review record (for FSRS parameter training)
 #[derive(Debug, Clone)]
 #[allow(dead_code)] // Struct used for future FSRS parameter optimization
@@ -265,7 +251,7 @@ impl Storage {
         Ok(self.conn.last_insert_rowid())
     }
 
-    /// Get all decks with card counts (due = due by end of today)
+    /// Get all decks with card counts (due = due now)
     /// keyboard_modes maps deck name to its KeyboardMode (from TSV files)
     pub fn get_deck_stats(
         &self,
@@ -276,10 +262,10 @@ impl Storage {
              FROM cards GROUP BY deck ORDER BY deck",
         )?;
 
-        let end_of_today_utc = end_of_today_utc();
+        let now = Utc::now().to_rfc3339();
 
         let stats = stmt
-            .query_map(params![end_of_today_utc], |row| {
+            .query_map(params![now], |row| {
                 let name: String = row.get(0)?;
                 let keyboard_mode = keyboard_modes.get(&name).copied().unwrap_or_default();
                 Ok(DeckStats {
