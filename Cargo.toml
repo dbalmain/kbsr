@@ -17,7 +17,7 @@ dirs = "6.0.0"
 fsrs = "5.2.0"
 rand = "0.10"
 ratatui = "0.30.0"
-rusqlite = { version = "0.38.0", features = ["bundled"] }
+rusqlite = { version = "0.39.0", features = ["bundled"] }
 serde = { version = "1.0.228", features = ["derive"] }
 toml = "1.0.1"
 
