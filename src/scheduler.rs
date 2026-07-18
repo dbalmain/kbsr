@@ -68,7 +68,7 @@ impl Scheduler {
         max_interval_days: f32,
     ) -> Result<Self> {
         Ok(Self {
-            fsrs: FSRS::new(Some(&DEFAULT_PARAMETERS))?,
+            fsrs: FSRS::new(&DEFAULT_PARAMETERS)?,
             desired_retention,
             interval_modifier,
             max_interval_days,

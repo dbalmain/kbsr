@@ -366,15 +366,13 @@ impl App {
             return Ok(());
         };
         match key.code {
-            KeyCode::Up | KeyCode::Char('k') => {
-                if self.selected_deck_idx > 0 {
-                    self.selected_deck_idx -= 1;
-                }
+            KeyCode::Up | KeyCode::Char('k') if self.selected_deck_idx > 0 => {
+                self.selected_deck_idx -= 1;
             }
-            KeyCode::Down | KeyCode::Char('j') => {
-                if self.selected_deck_idx + 1 < s.available_decks.len() {
-                    self.selected_deck_idx += 1;
-                }
+            KeyCode::Down | KeyCode::Char('j')
+                if self.selected_deck_idx + 1 < s.available_decks.len() =>
+            {
+                self.selected_deck_idx += 1;
             }
             KeyCode::Enter => {
                 if let AppState::DeckSelection(ds) = std::mem::take(&mut self.state) {
