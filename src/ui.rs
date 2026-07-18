@@ -243,7 +243,7 @@ pub fn render_paused(frame: &mut Frame, resume_keybind: &str) {
 pub fn render_summary(
     frame: &mut Frame,
     reviewed: usize,
-    correct: usize,
+    cleared_easy: usize,
     total_time_secs: u64,
     show_hints: bool,
 ) {
@@ -256,10 +256,10 @@ pub fn render_summary(
     ])
     .split(area);
 
-    let accuracy = if reviewed > 0 {
-        (correct as f64 / reviewed as f64) * 100.0
+    let time_str = if total_time_secs >= 60 {
+        format!("{}m {}s", total_time_secs / 60, total_time_secs % 60)
     } else {
-        0.0
+        format!("{}s", total_time_secs)
     };
 
     let lines = vec![
@@ -269,8 +269,8 @@ pub fn render_summary(
         )),
         Line::from(""),
         Line::from(format!("Cards reviewed: {}", reviewed)),
-        Line::from(format!("Correct: {} ({:.0}%)", correct, accuracy)),
-        Line::from(format!("Time: {}s", total_time_secs)),
+        Line::from(format!("Cleared Easy:   {}", cleared_easy)),
+        Line::from(format!("Time:           {}", time_str)),
     ];
 
     let summary = Paragraph::new(lines).alignment(Alignment::Center);

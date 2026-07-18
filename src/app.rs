@@ -19,7 +19,7 @@ use std::time::{Duration, Instant};
 
 struct SessionStats {
     reviewed: usize,
-    correct: usize,
+    cleared_easy: usize,
     start_time: Instant,
     end_time: Option<Instant>,
 }
@@ -33,16 +33,32 @@ struct DeckSelectionState {
     available_decks: Vec<DeckStats>,
 }
 
+enum PendingTransition {
+    FailedFlash { until: Instant },
+    SuccessFlash { until: Instant },
+}
+
+impl PendingTransition {
+    fn until(&self) -> Instant {
+        match self {
+            PendingTransition::FailedFlash { until }
+            | PendingTransition::SuccessFlash { until } => *until,
+        }
+    }
+}
+
 struct StudyState {
     cards: Vec<StudyCard>,
     card_idx: usize,
+    keyboard_mode: KeyboardMode,
     matcher: Matcher,
     card_start_time: Instant,
     attempts: u8,
     scored_card_ids: HashSet<i64>,
+    cleared_card_ids: HashSet<i64>,
+    total_unique_cards: usize,
     requeue_for_practice: bool,
-    failed_display_until: Option<Instant>,
-    success_display_until: Option<Instant>,
+    transition: Option<PendingTransition>,
     stats: SessionStats,
 }
 
@@ -55,6 +71,10 @@ struct SummaryState {
     stats: SessionStats,
 }
 
+// AppState lives as a single value on `App` and is never collected, so the
+// large StudyState variant doesn't cost us anything per-allocation. Boxing it
+// would add a dereference at every match site for no real benefit.
+#[allow(clippy::large_enum_variant)]
 enum AppState {
     DeckSelection(DeckSelectionState),
     Studying(StudyState),
@@ -74,10 +94,10 @@ pub struct App {
     config: Config,
     storage: Storage,
     scheduler: Scheduler,
-    pause_chord: Option<Chord>,
-    quit_chord: Option<Chord>,
+    pause_chord: Chord,
+    quit_chord: Chord,
     should_exit: bool,
-    current_keyboard_mode: Option<KeyboardMode>,
+    kbd_flags_pushed: bool,
     keyboard_modes: HashMap<String, KeyboardMode>,
     selected_deck_idx: usize,
     show_hints: bool,
@@ -94,12 +114,11 @@ impl App {
             config.max_interval_days,
         )?;
 
-        let pause_chord = Some(Chord::parse(&config.pause_keybind).with_context(|| {
+        let pause_chord = Chord::parse(&config.pause_keybind).with_context(|| {
             format!("Invalid pause_keybind '{}' in config", config.pause_keybind)
-        })?);
-        let quit_chord = Some(Chord::parse(&config.quit_keybind).with_context(|| {
-            format!("Invalid quit_keybind '{}' in config", config.quit_keybind)
-        })?);
+        })?;
+        let quit_chord = Chord::parse(&config.quit_keybind)
+            .with_context(|| format!("Invalid quit_keybind '{}' in config", config.quit_keybind))?;
 
         let show_hints = storage
             .get_setting("show_hints")
@@ -115,7 +134,7 @@ impl App {
             pause_chord,
             quit_chord,
             should_exit: false,
-            current_keyboard_mode: None,
+            kbd_flags_pushed: false,
             keyboard_modes: HashMap::new(),
             selected_deck_idx: 0,
             show_hints,
@@ -199,14 +218,14 @@ impl App {
         };
 
         if execute!(stdout(), PushKeyboardEnhancementFlags(flags)).is_ok() {
-            self.current_keyboard_mode = Some(mode);
+            self.kbd_flags_pushed = true;
         }
     }
 
     fn pop_keyboard_mode(&mut self) {
-        if self.current_keyboard_mode.is_some() {
+        if self.kbd_flags_pushed {
             let _ = execute!(stdout(), PopKeyboardEnhancementFlags);
-            self.current_keyboard_mode = None;
+            self.kbd_flags_pushed = false;
         }
     }
 
@@ -230,21 +249,16 @@ impl App {
                         None
                     };
 
-                    let answer_str = if self.current_keyboard_mode == Some(KeyboardMode::Command) {
+                    let answer_str = if s.keyboard_mode == KeyboardMode::Command {
                         card.keybind.as_command_string()
                     } else {
                         card.keybind.to_string()
                     };
-                    let pause_str = self
-                        .pause_chord
-                        .as_ref()
-                        .map(|c| c.to_string())
-                        .unwrap_or_default();
-                    let quit_str = self
-                        .quit_chord
-                        .as_ref()
-                        .map(|c| c.to_string())
-                        .unwrap_or_default();
+                    let pause_str = self.pause_chord.to_string();
+                    let quit_str = self.quit_chord.to_string();
+                    let cards_remaining = s
+                        .total_unique_cards
+                        .saturating_sub(s.cleared_card_ids.len());
                     let ui_state = ui::UiState {
                         deck: &card.stored.deck,
                         clue: &card.stored.description,
@@ -252,23 +266,22 @@ impl App {
                         showing_answer: s.attempts >= self.config.max_attempts,
                         answer: &answer_str,
                         message,
-                        show_success_checkmark: s.success_display_until.is_some(),
+                        show_success_checkmark: matches!(
+                            s.transition,
+                            Some(PendingTransition::SuccessFlash { .. })
+                        ),
                         card_cleared: !s.requeue_for_practice,
                         show_hints: self.show_hints,
                         pause_keybind: &pause_str,
                         quit_keybind: &quit_str,
-                        cards_remaining: s.cards.len() - s.card_idx,
-                        is_command_mode: self.current_keyboard_mode == Some(KeyboardMode::Command),
+                        cards_remaining,
+                        is_command_mode: s.keyboard_mode == KeyboardMode::Command,
                     };
                     ui::render(frame, &ui_state);
                 }
             }
             AppState::Paused(_) => {
-                let keybind_str = self
-                    .pause_chord
-                    .as_ref()
-                    .map(|c| c.to_string())
-                    .unwrap_or_else(|| "pause keybind".to_string());
+                let keybind_str = self.pause_chord.to_string();
                 ui::render_paused(frame, &keybind_str);
             }
             AppState::Summary(s) => {
@@ -280,7 +293,7 @@ impl App {
                 ui::render_summary(
                     frame,
                     s.stats.reviewed,
-                    s.stats.correct,
+                    s.stats.cleared_easy,
                     elapsed.as_secs(),
                     self.show_hints,
                 );
@@ -290,26 +303,23 @@ impl App {
 
     fn handle_events(&mut self) -> Result<()> {
         if let AppState::Studying(ref mut study) = self.state {
-            if let Some(until) = study.failed_display_until {
-                if Instant::now() >= until {
-                    study.matcher.reset();
-                    study.failed_display_until = None;
-                } else {
-                    let _ = event::poll(Duration::from_millis(50));
-                    return Ok(());
-                }
+            if let Some(transition) = &study.transition
+                && Instant::now() < transition.until()
+            {
+                let _ = event::poll(Duration::from_millis(50));
+                return Ok(());
             }
-
-            if let Some(until) = study.success_display_until {
-                if Instant::now() >= until {
-                    let AppState::Studying(mut study) = std::mem::take(&mut self.state) else {
-                        unreachable!()
-                    };
-                    study.success_display_until = None;
-                    self.next_card(study)?;
-                } else {
-                    let _ = event::poll(Duration::from_millis(50));
-                    return Ok(());
+            if let Some(transition) = study.transition.take() {
+                match transition {
+                    PendingTransition::FailedFlash { .. } => {
+                        study.matcher.reset();
+                    }
+                    PendingTransition::SuccessFlash { .. } => {
+                        let AppState::Studying(study) = std::mem::take(&mut self.state) else {
+                            unreachable!()
+                        };
+                        self.next_card(study)?;
+                    }
                 }
             }
         }
@@ -320,9 +330,7 @@ impl App {
                     return Ok(());
                 }
 
-                if let Some(ref quit_chord) = self.quit_chord
-                    && quit_chord.matches(&key, KeyboardMode::Raw)
-                {
+                if self.quit_chord.matches(&key, KeyboardMode::Raw) {
                     if matches!(self.state, AppState::DeckSelection(_)) {
                         self.should_exit = true;
                     } else {
@@ -332,9 +340,7 @@ impl App {
                     return Ok(());
                 }
 
-                if let Some(ref pause_chord) = self.pause_chord
-                    && pause_chord.matches(&key, KeyboardMode::Raw)
-                {
+                if self.pause_chord.matches(&key, KeyboardMode::Raw) {
                     if matches!(self.state, AppState::Paused(_)) {
                         self.resume();
                         return Ok(());
@@ -404,10 +410,11 @@ impl App {
 
         if key.code == KeyCode::Esc && study.attempts < self.config.max_attempts {
             study.attempts = self.config.max_attempts;
-            study.matcher = Matcher::new(
-                study.cards[study.card_idx].keybind.clone(),
-                self.current_keyboard_mode.unwrap_or_default(),
-            );
+            let card = study
+                .cards
+                .get(study.card_idx)
+                .expect("card_idx invariant: always points to a card while Studying");
+            study.matcher = Matcher::new(card.keybind.clone(), study.keyboard_mode);
             return Ok(());
         }
 
@@ -420,7 +427,10 @@ impl App {
                 };
                 study.attempts = study.attempts.saturating_add(1);
                 let response_time_ms = study.card_start_time.elapsed().as_millis() as u64;
-                let card = &study.cards[study.card_idx];
+                let card = study
+                    .cards
+                    .get(study.card_idx)
+                    .expect("card_idx invariant: always points to a card while Studying");
                 let card_id = card.stored.id;
                 let num_chords = card.keybind.len();
                 let easy_ms = Rating::scale_threshold(self.config.easy_threshold_ms, num_chords);
@@ -460,13 +470,16 @@ impl App {
                 if rating != Rating::Easy {
                     study.requeue_for_practice = true;
                 }
-                study.success_display_until =
-                    Some(Instant::now() + Duration::from_millis(self.config.success_delay_ms));
+                study.transition = Some(PendingTransition::SuccessFlash {
+                    until: Instant::now() + Duration::from_millis(self.config.success_delay_ms),
+                });
             }
             MatchState::Failed(_) => {
                 study.attempts = study.attempts.saturating_add(1);
-                study.failed_display_until =
-                    Some(Instant::now() + Duration::from_millis(self.config.failed_flash_delay_ms));
+                study.transition = Some(PendingTransition::FailedFlash {
+                    until: Instant::now()
+                        + Duration::from_millis(self.config.failed_flash_delay_ms),
+                });
             }
             MatchState::InProgress(_) => {}
         }
@@ -483,7 +496,7 @@ impl App {
         let mut cards = Vec::new();
         let stats = SessionStats {
             reviewed: 0,
-            correct: 0,
+            cleared_easy: 0,
             start_time: Instant::now(),
             end_time: None,
         };
@@ -497,7 +510,7 @@ impl App {
             self.state = AppState::Summary(SummaryState {
                 stats: SessionStats {
                     reviewed: 0,
-                    correct: 0,
+                    cleared_easy: 0,
                     start_time: Instant::now(),
                     end_time: Some(Instant::now()),
                 },
@@ -510,17 +523,20 @@ impl App {
             }
 
             let matcher = Matcher::new(cards[0].keybind.clone(), keyboard_mode);
+            let total_unique_cards = cards.len();
 
             self.state = AppState::Studying(StudyState {
                 cards,
                 card_idx: 0,
+                keyboard_mode,
                 matcher,
                 card_start_time: Instant::now(),
                 attempts: 0,
                 scored_card_ids: HashSet::new(),
+                cleared_card_ids: HashSet::new(),
+                total_unique_cards,
                 requeue_for_practice: false,
-                failed_display_until: None,
-                success_display_until: None,
+                transition: None,
                 stats,
             });
         }
@@ -550,25 +566,26 @@ impl App {
         Ok(())
     }
 
-    fn setup_current_card(study: &mut StudyState, mode: KeyboardMode) {
-        if let Some(card) = study.cards.get(study.card_idx) {
-            study.matcher = Matcher::new(card.keybind.clone(), mode);
-            study.card_start_time = Instant::now();
-            study.attempts = 0;
-            study.requeue_for_practice = false;
-        }
-    }
-
     fn next_card(&mut self, mut study: StudyState) -> Result<()> {
+        let current_card_id = study
+            .cards
+            .get(study.card_idx)
+            .expect("card_idx invariant: always points to a card while Studying")
+            .stored
+            .id;
+
         if study.requeue_for_practice {
-            if let Some(card) = study.cards.get(study.card_idx) {
-                study.cards.push(StudyCard {
-                    stored: card.stored.clone(),
-                    keybind: card.keybind.clone(),
-                });
-            }
+            let card = &study.cards[study.card_idx];
+            study.cards.push(StudyCard {
+                stored: card.stored.clone(),
+                keybind: card.keybind.clone(),
+            });
         } else {
-            study.stats.correct += 1;
+            study.cleared_card_ids.insert(current_card_id);
+            // Only count Easy clears in the headline summary stat. Other ratings
+            // (Good/Hard/Again) result in a requeue, so they reach this branch
+            // only when the same card returns and is finally rated Easy.
+            study.stats.cleared_easy += 1;
         }
 
         study.card_idx += 1;
@@ -578,7 +595,13 @@ impl App {
             self.pop_keyboard_mode();
             self.state = AppState::Summary(SummaryState { stats: study.stats });
         } else {
-            Self::setup_current_card(&mut study, self.current_keyboard_mode.unwrap_or_default());
+            let mode = study.keyboard_mode;
+            if let Some(card) = study.cards.get(study.card_idx) {
+                study.matcher = Matcher::new(card.keybind.clone(), mode);
+                study.card_start_time = Instant::now();
+                study.attempts = 0;
+                study.requeue_for_practice = false;
+            }
             self.state = AppState::Studying(study);
         }
 
@@ -614,10 +637,11 @@ impl App {
 
         if elapsed >= timeout && study.attempts < self.config.max_attempts {
             study.attempts = self.config.max_attempts;
-            study.matcher = Matcher::new(
-                study.cards[study.card_idx].keybind.clone(),
-                self.current_keyboard_mode.unwrap_or_default(),
-            );
+            let card = study
+                .cards
+                .get(study.card_idx)
+                .expect("card_idx invariant: always points to a card while Studying");
+            study.matcher = Matcher::new(card.keybind.clone(), study.keyboard_mode);
         }
     }
 }

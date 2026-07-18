@@ -69,7 +69,7 @@ Cards you get right are scheduled for future review. Cards you miss are repeated
 
 ## Terminal Requirements
 
-kbsr uses the Kitty keyboard protocol for key detection. Supported terminals include Kitty, WezTerm, Ghostty, and foot. Running inside tmux will mean you can't study your tmux keybinds. Similarly, if you're practicing your window manager keybinds, you'll need to disable them somehow.
+kbsr requires a terminal that implements the [Kitty keyboard protocol](https://sw.kovidgoyal.net/kitty/keyboard-protocol/), including `REPORT_ALTERNATE_KEYS` for `chars` and `command` mode decks. Supported terminals include Kitty, WezTerm, Ghostty, and foot. Other terminals may report keys incorrectly or not at all. Running inside tmux will mean you can't study your tmux keybinds. Similarly, if you're practicing your window manager keybinds, you'll need to disable them somehow.
 
 ## Documentation
 

@@ -13,11 +13,7 @@ pub struct StoredCard {
     pub description: String,
     pub stability: Option<f32>,
     pub difficulty: Option<f32>,
-    #[allow(dead_code)] // Used in DB queries, will be used for UI stats
-    pub due_date: Option<DateTime<Utc>>,
     pub last_review: Option<DateTime<Utc>>,
-    #[allow(dead_code)] // Used in DB, will be used for stats display
-    pub review_count: i32,
 }
 
 use crate::deck::KeyboardMode;
@@ -39,26 +35,10 @@ fn row_to_stored_card(row: &rusqlite::Row) -> rusqlite::Result<StoredCard> {
         description: row.get(3)?,
         stability: row.get(4)?,
         difficulty: row.get(5)?,
-        due_date: row
+        last_review: row
             .get::<_, Option<String>>(6)?
             .and_then(|s| s.parse().ok()),
-        last_review: row
-            .get::<_, Option<String>>(7)?
-            .and_then(|s| s.parse().ok()),
-        review_count: row.get(8)?,
     })
-}
-
-/// A review record (for FSRS parameter training)
-#[derive(Debug, Clone)]
-#[allow(dead_code)] // Struct used for future FSRS parameter optimization
-pub struct Review {
-    pub id: i64,
-    pub card_id: i64,
-    pub rating: i32,
-    pub response_time_ms: i64,
-    pub attempts: i32,
-    pub reviewed_at: DateTime<Utc>,
 }
 
 pub struct Storage {
@@ -193,8 +173,7 @@ impl Storage {
         let now = Utc::now().to_rfc3339();
 
         let mut stmt = self.conn.prepare(
-            "SELECT id, deck, keybind, description, stability, difficulty,
-                    due_date, last_review, review_count
+            "SELECT id, deck, keybind, description, stability, difficulty, last_review
              FROM cards
              WHERE deck = ?1 AND (due_date IS NULL OR due_date <= ?2)
              ORDER BY due_date ASC NULLS FIRST",
@@ -280,37 +259,6 @@ impl Storage {
         Ok(stats)
     }
 
-    /// Get reviews for a card.
-    /// Reserved for future FSRS parameter training from user review history.
-    #[allow(dead_code)]
-    pub fn get_reviews_for_card(&self, card_id: i64) -> Result<Vec<Review>> {
-        let mut stmt = self.conn.prepare(
-            "SELECT id, card_id, rating, response_time_ms, attempts, reviewed_at
-             FROM reviews WHERE card_id = ?1 ORDER BY reviewed_at ASC",
-        )?;
-
-        let reviews = stmt
-            .query_map(params![card_id], |row| {
-                Ok(Review {
-                    id: row.get(0)?,
-                    card_id: row.get(1)?,
-                    rating: row.get(2)?,
-                    response_time_ms: row.get(3)?,
-                    attempts: row.get(4)?,
-                    reviewed_at: row.get::<_, String>(5)?.parse().map_err(|e| {
-                        rusqlite::Error::FromSqlConversionFailure(
-                            5,
-                            rusqlite::types::Type::Text,
-                            Box::new(e),
-                        )
-                    })?,
-                })
-            })?
-            .collect::<Result<Vec<_>, _>>()?;
-
-        Ok(reviews)
-    }
-
     /// Get a setting value by key
     pub fn get_setting(&self, key: &str) -> Result<Option<String>> {
         let result = self.conn.query_row(
@@ -358,5 +306,168 @@ impl Storage {
             .with_context(|| format!("Failed to create backup at {}", backup_path.display()))?;
 
         Ok(Some(backup_path))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    struct CardRow {
+        id: i64,
+        stability: Option<f32>,
+        difficulty: Option<f32>,
+        due_date: Option<String>,
+        last_review: Option<String>,
+        review_count: i32,
+    }
+
+    fn fetch(storage: &Storage, deck: &str, keybind: &str) -> Option<CardRow> {
+        storage
+            .conn
+            .query_row(
+                "SELECT id, stability, difficulty, due_date, last_review, review_count
+                 FROM cards WHERE deck = ?1 AND keybind = ?2",
+                params![deck, keybind],
+                |row| {
+                    Ok(CardRow {
+                        id: row.get(0)?,
+                        stability: row.get(1)?,
+                        difficulty: row.get(2)?,
+                        due_date: row.get(3)?,
+                        last_review: row.get(4)?,
+                        review_count: row.get(5)?,
+                    })
+                },
+            )
+            .ok()
+    }
+
+    fn count_reviews(storage: &Storage, card_id: i64) -> i64 {
+        storage
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM reviews WHERE card_id = ?1",
+                params![card_id],
+                |row| row.get(0),
+            )
+            .unwrap()
+    }
+
+    fn new_storage() -> (Storage, TempDir) {
+        let dir = TempDir::new().unwrap();
+        let storage = Storage::open(&dir.path().join("test.db")).unwrap();
+        (storage, dir)
+    }
+
+    fn sync_one(storage: &mut Storage, deck: &str, cards: &[(&str, &str)]) {
+        let mut active = HashSet::new();
+        active.insert(deck.to_string());
+        let input = DeckSyncInput {
+            deck_name: deck.to_string(),
+            keybinds: cards
+                .iter()
+                .map(|(k, d)| (k.to_string(), d.to_string()))
+                .collect(),
+        };
+        storage.sync_decks(vec![input], &active).unwrap();
+    }
+
+    #[test]
+    fn sync_decks_inserts_new_cards() {
+        let (mut storage, _dir) = new_storage();
+        sync_one(&mut storage, "vim", &[("g g", "Top"), ("G", "Bottom")]);
+
+        assert!(fetch(&storage, "vim", "g g").is_some());
+        assert!(fetch(&storage, "vim", "G").is_some());
+    }
+
+    #[test]
+    fn sync_decks_preserves_progress_when_description_unchanged() {
+        let (mut storage, _dir) = new_storage();
+        sync_one(&mut storage, "vim", &[("g g", "Top")]);
+
+        let row = fetch(&storage, "vim", "g g").unwrap();
+        storage
+            .update_card_after_review(row.id, 4.2, 6.5, Utc::now() + chrono::Duration::days(5))
+            .unwrap();
+
+        sync_one(&mut storage, "vim", &[("g g", "Top")]);
+
+        let after = fetch(&storage, "vim", "g g").unwrap();
+        assert_eq!(after.stability, Some(4.2));
+        assert_eq!(after.difficulty, Some(6.5));
+        assert!(after.due_date.is_some());
+        assert!(after.last_review.is_some());
+        assert_eq!(after.review_count, 1);
+    }
+
+    #[test]
+    fn sync_decks_resets_progress_when_description_changes() {
+        let (mut storage, _dir) = new_storage();
+        sync_one(&mut storage, "vim", &[("g g", "Top")]);
+
+        let row = fetch(&storage, "vim", "g g").unwrap();
+        storage
+            .update_card_after_review(row.id, 4.2, 6.5, Utc::now() + chrono::Duration::days(5))
+            .unwrap();
+
+        sync_one(&mut storage, "vim", &[("g g", "Go to top of file")]);
+
+        let after = fetch(&storage, "vim", "g g").unwrap();
+        assert!(after.stability.is_none());
+        assert!(after.difficulty.is_none());
+        assert!(after.due_date.is_none());
+        assert!(after.last_review.is_none());
+        assert_eq!(after.review_count, 0);
+    }
+
+    #[test]
+    fn sync_decks_removes_dropped_keybinds_and_their_reviews() {
+        let (mut storage, _dir) = new_storage();
+        sync_one(&mut storage, "vim", &[("g g", "Top"), ("G", "Bottom")]);
+
+        let g = fetch(&storage, "vim", "G").unwrap();
+        storage.record_review(g.id, 3, 1500, 1).unwrap();
+        assert_eq!(count_reviews(&storage, g.id), 1);
+
+        sync_one(&mut storage, "vim", &[("g g", "Top")]);
+
+        assert!(fetch(&storage, "vim", "G").is_none());
+        // Deleting the card must also delete its reviews — verified by querying
+        // the previous card_id directly since the row may already be gone.
+        let orphans: i64 = storage
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM reviews WHERE card_id = ?1",
+                params![g.id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(orphans, 0);
+    }
+
+    #[test]
+    fn sync_decks_removes_orphaned_decks() {
+        let (mut storage, _dir) = new_storage();
+        sync_one(&mut storage, "vim", &[("g g", "Top")]);
+        sync_one(&mut storage, "vscode", &[("Ctrl+S", "Save")]);
+
+        // Now sync with only vim present in the active set.
+        let mut active = HashSet::new();
+        active.insert("vim".to_string());
+        storage
+            .sync_decks(
+                vec![DeckSyncInput {
+                    deck_name: "vim".to_string(),
+                    keybinds: vec![("g g".to_string(), "Top".to_string())],
+                }],
+                &active,
+            )
+            .unwrap();
+
+        assert!(fetch(&storage, "vim", "g g").is_some());
+        assert!(fetch(&storage, "vscode", "Ctrl+S").is_none());
     }
 }

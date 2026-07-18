@@ -149,7 +149,7 @@ mod tests {
         writeln!(file, "Ctrl+S\tSave file").unwrap();
         writeln!(file, "g g\tGo to top").unwrap();
         writeln!(file, "# This is a comment").unwrap();
-        writeln!(file, "").unwrap();
+        writeln!(file).unwrap();
         writeln!(file, "Ctrl+K Ctrl+C\tComment selection").unwrap();
 
         let deck = Deck::load(file.path()).unwrap();

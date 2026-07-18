@@ -47,41 +47,42 @@ impl Chord {
         Ok(Chord(KeyEvent::new(code, modifiers)))
     }
 
-    /// Check if this chord matches a key event
-    /// Handles both keyboard modes:
-    /// - Chars mode: exact character match (case-sensitive), including with modifiers
-    /// - Raw mode: Shift+g stays as Shift+g, so we check if uppercase matches;
-    ///   modified keys use case-insensitive char (terminals report Ctrl+s for Ctrl+S)
+    /// Check if this chord matches a key event.
+    ///
+    /// All modes assume a terminal that speaks the Kitty keyboard protocol
+    /// (see the README's Terminal Requirements). What the terminal reports for
+    /// a given key — and therefore what counts as a match — depends on which
+    /// enhancement flags the active mode pushed:
+    ///
+    /// - **Chars / Command mode** pushes `REPORT_ALTERNATE_KEYS`, so Shift+g
+    ///   arrives as `Char('G')` directly. Matching is a straight case-sensitive
+    ///   comparison, with exact modifier equality for chords like `Ctrl+S`.
+    /// - **Raw mode** does not push `REPORT_ALTERNATE_KEYS`, so Shift+g
+    ///   arrives as `Char('g') + SHIFT`. An uppercase chord like `G` must
+    ///   therefore also accept the Shift+lowercase form. Modified chords use
+    ///   case-insensitive character comparison because some terminals report
+    ///   Ctrl+S as `Ctrl+s`.
     pub fn matches(&self, event: &KeyEvent, mode: KeyboardMode) -> bool {
         match (&self.0.code, &event.code) {
             (KeyCode::Char(expected), KeyCode::Char(actual)) => {
                 if self.0.modifiers == KeyModifiers::NONE {
-                    // Unmodified character chord (e.g., 'G' or '$')
                     if *expected == *actual {
-                        // Exact match (works in Chars mode)
                         return true;
                     }
-                    // Raw mode: check if Shift+lowercase produces this char
-                    if event.modifiers == KeyModifiers::SHIFT {
-                        // For uppercase letters: Shift+g should match 'G'
-                        if expected.is_ascii_uppercase() && *actual == expected.to_ascii_lowercase()
-                        {
-                            return true;
-                        }
-                    }
-                    false
+                    // Raw-only fallback: Shift+lowercase matches uppercase
+                    // chord. Chars/Command mode receives the alternate (already
+                    // uppercased) key, so this never fires there.
+                    mode == KeyboardMode::Raw
+                        && event.modifiers == KeyModifiers::SHIFT
+                        && expected.is_ascii_uppercase()
+                        && *actual == expected.to_ascii_lowercase()
                 } else if mode == KeyboardMode::Chars || mode == KeyboardMode::Command {
-                    // Chars mode: require modifier match and case-sensitive char
                     self.0.modifiers == event.modifiers && *expected == *actual
                 } else {
-                    // Raw mode: require modifier match and case-insensitive char
                     self.0.modifiers == event.modifiers && expected.eq_ignore_ascii_case(actual)
                 }
             }
-            _ => {
-                // Non-character keys: require exact match including modifiers
-                self.0.modifiers == event.modifiers && self.0.code == event.code
-            }
+            _ => self.0.modifiers == event.modifiers && self.0.code == event.code,
         }
     }
 }
@@ -254,11 +255,6 @@ fn format_key_code(code: &KeyCode) -> String {
     }
 }
 
-/// Convert a KeyEvent to a Chord (for display purposes)
-pub(crate) fn key_event_to_chord(event: &KeyEvent) -> Chord {
-    Chord(KeyEvent::new(event.code, event.modifiers))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -416,6 +412,31 @@ mod tests {
         let original = "docker compose up -d";
         let kb = Keybind::parse_command(original).unwrap();
         assert_eq!(kb.as_command_string(), original);
+    }
+
+    #[test]
+    fn test_shift_lowercase_matches_uppercase_chord() {
+        // Locks in the per-mode behaviour of the Shift+lowercase fallback.
+        // Raw mode needs it (terminals report Char('g')+SHIFT under the kitty
+        // base flags). Chars/Command mode pushes REPORT_ALTERNATE_KEYS, so
+        // Shift+g arrives as Char('G') and the fallback must NOT fire —
+        // otherwise decks couldn't distinguish 'G' from Shift+g.
+        let chord = Chord::parse("G").unwrap();
+        let shift_lower = KeyEvent::new(KeyCode::Char('g'), KeyModifiers::SHIFT);
+        let plain_upper = KeyEvent::new(KeyCode::Char('G'), KeyModifiers::NONE);
+        let plain_lower = KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE);
+
+        // Raw mode: both forms accepted.
+        assert!(chord.matches(&shift_lower, KeyboardMode::Raw));
+        assert!(chord.matches(&plain_upper, KeyboardMode::Raw));
+
+        // Chars mode: only the alternate-key form.
+        assert!(!chord.matches(&shift_lower, KeyboardMode::Chars));
+        assert!(chord.matches(&plain_upper, KeyboardMode::Chars));
+
+        // Plain lowercase 'g' never matches an uppercase chord.
+        assert!(!chord.matches(&plain_lower, KeyboardMode::Raw));
+        assert!(!chord.matches(&plain_lower, KeyboardMode::Chars));
     }
 
     #[test]

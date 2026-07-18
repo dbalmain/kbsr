@@ -1,5 +1,5 @@
 use crate::deck::KeyboardMode;
-use crate::keybind::{Chord, Keybind, key_event_to_chord};
+use crate::keybind::{Chord, Keybind};
 use crossterm::event::KeyEvent;
 
 /// State of the input matching
@@ -55,7 +55,7 @@ impl Matcher {
 
     /// Process a key event and return the new state
     pub fn process(&mut self, event: KeyEvent) -> MatchState {
-        let chord = key_event_to_chord(&event);
+        let chord = Chord(KeyEvent::new(event.code, event.modifiers));
 
         // If already failed, check if this is the start of a retry
         if self.failed {
